@@ -12,13 +12,13 @@
 
 ## 프로젝트 구조와 모듈 구성
 
-이 저장소는 로컬 백엔드와 자료 도구를 구현한 단계입니다. `src/http`는 Hono API, `src/storage`는 SQLite와 상품 XLSX, `src/tools`는 읽기·계산 도구와 MCP stdio, `src/agent`는 채팅 수신 서비스와 Flue 도구/에이전트 팩터리, `src/domain`은 입력·출력 검증입니다. `src/cli`는 같은 기능의 CLI이며 `tests/backend.test.ts`는 Node 표준 테스트입니다. `src/agent/flue-runner.ts`가 실제 Flue 실행기, `runtime-agent.ts`가 방 맥락·도구·제출 계약, `typesafe.ts`가 Jev 분류 연결입니다. `Dockerfile`과 `compose.yaml`은 단일 서버 배포를 제공합니다.
+이 저장소는 로컬 백엔드와 자료 도구를 구현한 단계입니다. `src/http`는 Hono API, `src/storage`는 SQLite와 상품 XLSX, `src/tools`는 읽기·계산 도구와 MCP stdio, `src/agent`는 채팅 수신 서비스와 Flue 도구/에이전트 팩터리, `src/domain`은 입력·출력 검증입니다. `src/cli`는 같은 기능의 CLI이며 `tests/backend.test.ts`는 Node 표준 테스트입니다. `src/agent/flue-runner.ts`가 실제 Flue 실행기, `runtime-agent.ts`가 방 맥락·도구·제출 계약, `typesafe.ts`가 Jev 분류 연결입니다. `Dockerfile`과 `compose.yaml`은 웹과 API 단일 서버 배포를 제공합니다. `web/`은 React·Vite 검토 화면이며 실제 API를 호출합니다. `web/src/api.ts`는 검증된 HTTP 계약, `workspace.ts`는 방별 상태·재시도, `data.ts`는 서버 자료 표시 변환, `App.tsx`는 화면, `ResourceEditor.tsx`는 상품·정책 폼, `resource-version.ts`는 오래된 분석 판정입니다. `src/domain/http-contract.ts`가 공유 응답 스키마이고 `src/http/session.ts`는 브라우저 연결 세션입니다.
 
 `README.md`는 실행·지원 상태, `docs/backend.md`는 실제 API·저장·도구 계약, `docs/implementation-plan.md`는 구현 결정과 남은 연결·품질 평가 계획입니다. `docs/samples/`의 가상 자료와 Python 검사·회귀 테스트도 유지합니다.
 
 ## 빌드·테스트·개발 명령어
 
-Node.js `26.5.1` 이상 `27` 미만과 npm을 사용합니다. `npm ci`, `npm run dev`, `npm run build`, `npm start`가 설치·개발·빌드·실행 명령입니다. `npm run typecheck`, `npm run lint`, `npm run format:check`, `npm test`로 검증합니다. Node 내장 SQLite API 버전 변화는 실제 실행으로 검증하세요.
+Node.js `26.5.1` 이상 `27` 미만과 npm을 사용합니다. `npm ci`, `npm run dev`, `npm run build`, `npm start`가 설치·개발·빌드·실행 명령입니다. `npm run typecheck`, `npm run lint`, `npm run format:check`, `npm test`로 검증합니다. 웹 개발은 `npm run dev`와 `npm run web:dev`를 함께 실행합니다. `npm run build && npm run web:build && npm start`는 Hono에서 웹과 API를 제공합니다. `web:preview`는 API 없는 정적 확인용입니다. 타입·린트·포맷 명령은 web도 검사하며 CI는 웹 빌드를 포함합니다. Node 내장 SQLite API 버전 변화는 실제 실행으로 검증하세요.
 
 문서·샘플 변경 후 `python3 docs/samples/validate.py`, `python3 -m unittest discover -s docs/tests -v`, `git diff --check`를 실행하세요. 샘플·회귀 검사나 모델 없는 백엔드 테스트를 제품 AI 품질 검증 통과로 보고하지 마세요.
 
@@ -43,6 +43,12 @@ DB·상품 XLSX·MCP 명령은 `docs/backend.md`를 따릅니다. 파일 SQLite�
 DM 샘플의 `conversation`을 원본으로 유지하고 분석용 `input.text`와 `dm-examples.md`를 함께 갱신하세요. 여러 메시지의 역할·최신 정정·생략된 맥락을 보존하세요. 붙여넣은 판매자 말투나 참고 글을 상품 사실·정책 승인 근거로 사용하지 마세요.
 
 가능한 경우 새 기능에는 동작 테스트를, 버그 수정에는 재발 방지 테스트를 추가하세요. 성공 사례뿐 아니라 실패 경로와 경계 조건도 확인하세요. 문서만 변경한 경우 내용의 정확성과 Markdown 형식을 검토하세요.
+
+## 웹 검토 화면 지침
+
+가상 시안과 실제 모델 분석을 구분하세요. 새로 입력한 DM에 샘플 분석 결과를 붙이지 마세요. 주문 확정·전송처럼 미구현 동작을 가능한 버튼으로 표시하지 마세요. Provider 키와 API 토큰을 프런트 번들에 주입하지 마세요. 개발 프록시는 서버에서만 토큰을 붙이며 원래 Host/Origin을 검사합니다. 빌드 웹은 HttpOnly 연결 세션을 사용합니다. 방·원문·분석·도구 기록의 원본은 SQLite이며 브라우저에는 표시 설정만 저장합니다. 통신 결과 미확인 재시도는 같은 ID, 종료된 실패 재분석은 새 ID를 사용하고 새로고침으로 모델을 자동 호출하지 마세요. 초안 편집·검토 표시는 화면 메모리입니다. 상품·정책 수정은 서버의 동일 Store 검증/트랜잭션을 거치며 읽은 snapshot_id로 덮어쓰기 충돌을 거절하세요. 과거 주문 금액을 재계산하지 마세요. 복사 전 서버 버전을 확인하고 오래된 초안의 복사를 막으세요. 참고 문서로 현재 SQLite 정책을 덮어쓰지 마세요.
+
+아이콘은 Lucide로 통일하고 버튼 이름과 키보드 초점을 유지합니다. 320·375·414·768px과 데스크톱에서 화면·주요 클릭 흐름을 직접 확인하세요. 상태 예시를 실제 요청·저장 성공으로 보고하지 마세요.
 
 ## AI 기능 구현 시 지침
 

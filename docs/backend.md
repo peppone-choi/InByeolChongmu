@@ -31,7 +31,7 @@ DB 기본 경로는 `.local/inbyeol.sqlite`입니다. `DATABASE_PATH=:memory:`�
 
 ## 저장과 대화방 구분
 
-SQLite의 `sources`, `records`는 판매자와 자료 종류로 구분합니다. 상품·정책·주문은 ID·원본 스냅샷을 보존하며 기존 주문 금액은 저장 당시 값을 읽습니다. 자료 적재로 샘플 재고를 다시 차감하지 않습니다. 스키마 초기화는 자동 수행하고 `schema_migrations`에 버전 1을 기록합니다.
+SQLite의 `sources`, `records`는 판매자와 자료 종류로 구분합니다. 상품·정책·주문은 ID·원본 스냅샷을 보존하며 기존 주문 금액은 저장 당시 값을 읽습니다. 자료 적재로 샘플 재고를 다시 차감하지 않습니다. 스키마 초기화는 자동 수행하고 `schema_migrations`에 자료·대화 테이블 버전 1과 실행/도구 기록 테이블 버전 2를 기록합니다.
 
 `판매자 → 고객 계정 → 대화방 → 메시지`로 구분합니다. 같은 고객도 `context_label`을 달리해 여러 방을 만들 수 있습니다. 방이 어느 주문을 뜻하는지는 모델이 임의 확정하지 않습니다. 주문 후보 선택·확정 기능은 후속입니다.
 
@@ -41,15 +41,21 @@ SQLite의 `sources`, `records`는 판매자와 자료 종류로 구분합니다.
 
 ## 로컬 API
 
-로컬 실행에서는 `127.0.0.1:3000`에 바인딩합니다. `PORT`로 포트를 변경할 수 있습니다. Host와 Origin도 로컬·동일 출처로 제한하고, `LOCAL_API_TOKEN`을 설정하면 모든 경로에 `Authorization: Bearer ...`가 필요합니다. 컨테이너에서는 `APP_DEPLOYMENT=container`로 `0.0.0.0`에 바인딩하며 32자 이상 토큰이 필수입니다. `production`에서 container 설정이나 충분한 토큰이 없으면 시작을 거절합니다. 이 토큰은 단일 판매자 접근용이며 사용자별 운영 인증은 아닙니다.
+로컬 실행에서는 `127.0.0.1:3000`에 바인딩합니다. `PORT`로 포트를 변경할 수 있습니다. Host와 Origin도 로컬·동일 출처로 제한하고, `LOCAL_API_TOKEN`을 설정하면 API와 `/health`에 Bearer 토큰 또는 HttpOnly 브라우저 세션이 필요합니다. 웹 셸(`/`)·해시 자산(`/assets/*`)과 세션 연결 경로는 공개되며 env·DB·소스는 정적으로 제공하지 않습니다. 컨테이너에서는 `APP_DEPLOYMENT=container`로 `0.0.0.0`에 바인딩하며 32자 이상 토큰이 필수입니다. `production`에서 container 설정이나 충분한 토큰이 없으면 시작을 거절합니다. 이 토큰은 단일 판매자 접근용이며 사용자별 운영 인증은 아닙니다.
 
-- `GET /health`: 자료 서버 상태. `model_configured`와 `model_status`는 설정 유무만 표시하며 실제 공급자 접근 성공을 보증하지 않습니다.
+- `GET /api/session`: 인증 여부·인증 필요 여부·현재 인증 방식만 반환합니다.
+- `POST /api/session`: `{ "token":"LOCAL_API_TOKEN 값" }`으로 연결합니다. 8시간·HttpOnly·SameSite=Strict 쿠키(HTTPS에서는 Secure)를 발급하며 원래 토큰을 쿠키/응답에 넣지 않습니다. 최대 100개 세션을 메모리에 두고 재시작 시 만료합니다. `DELETE /api/session`은 연결을 해제합니다. 사용자별 운영 인증이 아닙니다.
+- `GET /api/resources`: 현재 판매자의 상품·정책과 상품/정책/주문 스냅샷 ID. 주문 원본은 포함하지 않습니다.
+- `PUT /api/resources/products/:id`: `{snapshot_id,product}`. 읽은 상품 스냅샷과 전체 상품 객체를 보내 기존 상품을 수정합니다. ID/SKU 추가·삭제·변경은 거절하고 필수값·숫자·중복·할인 호환성을 검증한 뒤 원자 저장합니다.
+- `PUT /api/resources/policies/:id`: `{snapshot_id,policy}`. 기존 정책 종류를 보존하고 수정합니다. 배송비 1개·할인 최대 1개, 실제 할인 상품·최소 수량·할인액을 검증합니다. 배송비/할인/출고일 문구는 입력된 구조화 값으로 생성해 문구와 계산을 일치시킵니다. 일반 정책 문구는 직접 편집합니다.
+- `GET /health`: 자료 서버 상태. `model_configured`와 `model_status`는 설정 유무만 표시하며 실제 공급자 접근 성공을 보증하지 않습니다. 모델 이름·실행 제한·TypeSafe 키 설정 여부만 추가로 반환하며 키 값은 포함하지 않습니다.
 - `GET /api/tools`: 허용 도구 목록·입력 JSON Schema.
 - `POST /api/tools/:name`: `{ "arguments": { ... }, "conversation_id": "선택 UUID" }`. 방이 있으면 해당 고객 범위의 주문만 조회합니다. 방 없는 호출은 로컬 판매자 관리용입니다.
 - `POST /api/conversations`: `{ "customer_handle":"@sample.hana", "context_label":"가디건 주문" }` → `201`, `{conversation}`.
-- `GET /api/conversations?customer_handle=@sample.hana`: 고객별 방 목록. 필터가 없으면 최대 100개.
+- `GET /api/conversations?customer_handle=@sample.hana`: 고객별 방 목록과 최신 요청의 요약 상태·유형·미리보기. 필터가 없으면 최근 생성 순으로 최대 100개.
+- `GET /api/conversations/:id`: 방·최근 200메시지·최신 요청 ID/텍스트·실행 당시 스냅샷·실행 상태·분석·안전한 도구 진행 기록. 새로고침 복원과 2초 폴링에 사용합니다. 모델 호출을 시작하지 않습니다.
 - `GET /api/conversations/:id/messages`: 해당 방의 최근 메시지.
-- `POST /api/chat`: 아래 형식으로 수신하고 `{conversation_id,replayed,analysis,execution?}` 반환. `execution`은 실행 ID·Flue 모델 호출 수·도구 이름/성공 여부를 포함하고 공급자 원문·키는 포함하지 않습니다.
+- `POST /api/chat`: 아래 형식으로 수신하고 `{conversation_id,replayed,analysis,execution?}` 반환. `execution`은 실행 ID·Flue 모델 호출 수·도구 호출 ID·이름/성공 여부·running/succeeded/failed 상태를 포함하고 공급자 원문·키는 포함하지 않습니다.
 
 ```json
 {
@@ -91,6 +97,10 @@ MCP를 사용할 클라이언트는 `node_modules/.bin/tsx src/cli/main.ts mcp`�
 
 Flue용 도구는 `arguments` 객체 안에 원래 도구 입력을 넣습니다. 예: `search_products({arguments:{query:"가디건"}})`. 자동 테스트는 실제 Flue 실행기와 스크립트 모델로 도구 호출·검증 거절·한도·중단·재전송을 검사합니다. `npm run verify:agent`는 명시적 유료 실제 연결 검사이며 가상 주문의 맥락·62,000원 계산·TypeSafe 호출·중복 호출 방지·원본 보존을 확인합니다. 가상 40건/실제 50건 품질 평가는 별도입니다. 스키마·근거 ID·금액 검증만으로 답장 문장 전체의 사실성이나 추출 정확성을 보장하지 않습니다.
 
+## 답장 복사 형식
+
+`reply_draft`는 고객에게 보낼 본문만 반환합니다. 주문은 `[주문 상품]`·`[받는 분]`·`[결제 금액]`·`[안내]`를 빈 줄로 나누고, 항목을 한 줄씩 씁니다. 누락값은 `[확인 부탁드려요]`로 질문하며 문의·배송·클레임은 필요한 블록만 사용합니다. 표·Markdown 장식·JSON·판매자용 내부 메모는 본문에서 제외합니다. 입금 확인·주소 미검증 등 판매자 주의사항은 `review_items`에 보존합니다. 고객에게 필요한 불확실성 안내와 승인 경계는 유지합니다. 프롬프트 변경은 새 분석부터 적용되며 이미 저장한 답장을 소급 변경하지 않습니다.
+
 ## 의존성 호환성
 
 Flue 2.3.0의 Pi 의존성은 최신 범위 해석 시 `Type` 내보내기 불일치가 있어 Pi AI/Core를 1.1.0으로 고정했습니다. Flue 하위 MCP 클라이언트는 2.4.0, minimatch 7~10 범위는 11.0.4, ExcelJS의 UUID는 11.1.1로 재정의해 설치 시 보고된 취약 범위를 피했습니다. 잠금 파일과 함께 관리하고 업데이트 시 Flue 모듈 가져오기·도구 정의·MCP·XLSX 테스트를 다시 실행합니다.
@@ -110,7 +120,7 @@ docker compose logs --tail=20 api
 docker compose down
 ```
 
-`.env.local`을 실행 시 주입하며 이미지 빌드에는 포함하지 않습니다. `LOCAL_API_TOKEN`은 32자 이상 무작위 값이어야 합니다. 예를 들어 `openssl rand -hex 32`의 결과를 로컬 env에 저장하고 채팅·로그·Git에 공유하지 마세요. 모든 경로는 `Authorization: Bearer <LOCAL_API_TOKEN>`으로 호출합니다. 토큰을 만들거나 바꾸면 클라이언트도 같은 값을 사용해야 합니다.
+`.env.local`을 실행 시 주입하며 이미지 빌드에는 포함하지 않습니다. `LOCAL_API_TOKEN`은 32자 이상 무작위 값이어야 합니다. 예를 들어 `openssl rand -hex 32`의 결과를 로컬 env에 저장하고 채팅·로그·Git에 공유하지 마세요. API는 `Authorization: Bearer <LOCAL_API_TOKEN>`으로 호출하거나 웹 연결 화면에서 같은 토큰으로 세션을 발급받습니다. 웹과 API는 `http://127.0.0.1:3000`에서 함께 제공합니다. 토큰을 만들거나 바꾸면 클라이언트도 같은 값을 사용해야 합니다.
 
 Compose는 `NODE_ENV=production`, `APP_DEPLOYMENT=container`, `/app/.local/inbyeol.sqlite`와 `/app/.local/flue.sqlite`를 지정합니다. 단일 Node 프로세스, 비특권 사용자, 읽기 전용 루트와 쓰기 가능한 영속 볼륨으로 실행하며 호스트 포트는 `127.0.0.1:3000`입니다. 시작 시 샘플 seed는 자료가 없는 판매자 영역에만 적용됩니다. 실제 서버 공개에는 별도 HTTPS와 사용자별 인증·보관 정책이 필요합니다. Cloudflare 배포나 Gateway 라우팅은 이 Compose에 포함하지 않습니다.
 
@@ -121,3 +131,17 @@ Compose는 `NODE_ENV=production`, `APP_DEPLOYMENT=container`, `/app/.local/inbye
 ## Cloudflare 설정 상태
 
 공식 [agent setup 지침](https://developers.cloudflare.com/agent-setup/prompt.md)에 따라 개발 환경의 Cloudflare 스킬·MCP 로그인·CLI 인증을 설정했습니다. 이는 저장소나 Docker 이미지에 로그인 토큰을 저장하는 절차가 아닙니다. 계정의 기본 AI Gateway를 확인했지만 저장된 BYOK 공급자 키는 없었습니다. 현재 앱은 OpenAI·TypeSafe 키를 env에서 직접 읽으며 Cloudflare MCP OAuth 토큰을 재사용하지 않습니다. Gateway용 변수는 예약된 설정이고 실제 추론 라우팅은 아직 연결하지 않았습니다.
+
+## 웹 개발 프록시
+
+`npm run dev`와 `npm run web:dev`를 별도 터미널에서 실행합니다. Vite는 `/api`·`/health`를 루프백 API로 프록시하며 서버 프로세스에서만 env 토큰을 붙입니다. 원래 localhost/127.0.0.1:5173 Host와 동일 출처 Origin을 검사한 후 API 출처로 변환합니다. 브라우저에 Provider 키·연결 토큰을 주입하지 않으며 env·DB 파일 제공도 거절합니다. 두 프로세스는 같은 `PORT`를 사용해야 합니다. 프록시는 개발 서버 전용이며 외부에 공개하지 않습니다.
+
+빌드 웹은 `npm run build && npm run web:build && npm start`로 Hono에서 제공하며 Docker도 같은 자산을 포함합니다. `web:preview`는 정적 확인용이고 API 프록시가 없습니다. 서버 연결 세션은 별도 DB 마이그레이션 없이 메모리에서 관리합니다.
+
+## 자료 수정과 오래된 분석
+
+웹 폼의 상품명·별칭·소재·기존 실측·판매 마감·기존 옵션의 색상/크기/가격/재고와 판매 정책을 수정할 수 있습니다. 신규 상품/옵션/정책 생성·삭제, 신규 실측 항목 추가, 파일 가져오기는 웹 범위 밖입니다. 상품 편집 XLSX는 기존 CLI를 사용합니다. 재고 입력은 판매자 자료 정정이며 주문 확정에 따른 재고 차감이 아닙니다.
+
+상품/정책 수정은 `BEGIN IMMEDIATE` 안에서 판매자·ID·자료 버전을 검사하고 저장합니다. 오래된 창은 `409 / STALE_VERSION`으로 거절하며 입력은 유지합니다. 최신 자료로 다시 열기는 사용자가 선택합니다. 스키마 마이그레이션 없이 기존 records/sources를 사용하고 과거 주문 금액·주문 상태는 바꾸지 않습니다. 에이전트에는 수정 도구를 노출하지 않습니다.
+
+완료된 분석은 실행 당시의 자료 버전을 보존합니다. 수정 후 오래된 답장을 경고하고 복사를 막으며, 복사 직전 서버 버전을 다시 조회해 다른 창의 수정도 확인합니다. 최신 자료로 재분석은 새 요청 ID로 모델을 다시 호출합니다. 분석 진행 중 자료가 바뀌면 기존 출력 검증이 STALE_VERSION으로 거절합니다. 저장된 답장을 소급 수정하지 않습니다.

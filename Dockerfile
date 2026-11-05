@@ -6,7 +6,8 @@ RUN npm ci --ignore-scripts
 FROM dependencies AS build
 COPY tsconfig.json tsconfig.build.json ./
 COPY src ./src
-RUN npm run build && npm prune --omit=dev --ignore-scripts
+COPY web ./web
+RUN npm run build && npm run web:build && npm prune --omit=dev --ignore-scripts
 
 FROM node:26.5.1-bookworm-slim AS runtime
 ENV NODE_ENV=production APP_DEPLOYMENT=container PORT=3000 DATABASE_PATH=/app/.local/inbyeol.sqlite FLUE_DATABASE_PATH=/app/.local/flue.sqlite

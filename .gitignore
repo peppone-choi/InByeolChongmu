@@ -10,3 +10,5 @@ dist/
 *.sqlite-shm
 *.sqlite-wal
 coverage/
+
+.DS_Store

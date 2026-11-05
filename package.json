@@ -10,10 +10,10 @@
     "dev": "tsx watch src/http/server.ts",
     "start": "node dist/http/server.js",
     "build": "tsc -p tsconfig.build.json",
-    "typecheck": "tsc --noEmit",
-    "lint": "eslint src tests",
-    "format": "prettier --write src tests package.json tsconfig*.json eslint.config.js .prettierrc.json .github/workflows/backend.yml",
-    "format:check": "prettier --check src tests package.json tsconfig*.json eslint.config.js .prettierrc.json .github/workflows/backend.yml",
+    "typecheck": "tsc --noEmit && tsc -p web/tsconfig.json",
+    "lint": "eslint src tests web",
+    "format": "prettier --write src tests web package.json tsconfig*.json eslint.config.js .prettierrc.json .github/workflows/backend.yml",
+    "format:check": "prettier --check src tests web package.json tsconfig*.json eslint.config.js .prettierrc.json .github/workflows/backend.yml",
     "test": "tsx --test tests/*.test.ts",
     "db:seed": "tsx src/cli/main.ts seed",
     "tools": "tsx src/cli/main.ts tools",
@@ -22,7 +22,10 @@
     "data:import": "tsx src/cli/main.ts import",
     "mcp": "tsx src/cli/main.ts mcp",
     "db:backup": "tsx src/cli/main.ts backup",
-    "verify:agent": "tsx src/cli/verify-agent.ts"
+    "verify:agent": "tsx src/cli/verify-agent.ts",
+    "web:dev": "vite web --config web/vite.config.ts",
+    "web:build": "tsc -p web/tsconfig.json && vite build web --config web/vite.config.ts",
+    "web:preview": "vite preview web --config web/vite.config.ts"
   },
   "dependencies": {
     "@earendil-works/pi-ai": "1.1.0",
@@ -38,11 +41,18 @@
   "devDependencies": {
     "@eslint/js": "10.0.1",
     "@types/node": "26.6.6",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "6.2.1",
     "eslint": "10.14.0",
+    "lucide-react": "1.68.0",
     "prettier": "3.9.10",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
     "tsx": "4.23.15",
     "typescript": "6.0.3",
-    "typescript-eslint": "8.72.1"
+    "typescript-eslint": "8.72.1",
+    "vite": "8.3.5"
   },
   "overrides": {
     "@flue/runtime": {

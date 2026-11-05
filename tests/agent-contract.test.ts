@@ -75,6 +75,19 @@ test('validation requires real lookup/quote evidence and rejects changed amounts
       validateAnalysis(store, run, analysis).order_draft?.amounts?.total_krw,
       62000,
     );
+    const copyable = structuredClone(analysis);
+    copyable.reply_draft =
+      '[주문 상품]\\n니트 가디건\\n\\n[결제 금액]\\n62,000원';
+    assert.equal(
+      validateAnalysis(store, run, copyable).reply_draft,
+      '[주문 상품]\n니트 가디건\n\n[결제 금액]\n62,000원',
+    );
+    const fakeSource = structuredClone(analysis);
+    fakeSource.evidence[0]!.source_id = 'quote_order';
+    assert.throws(
+      () => validateAnalysis(store, run, fakeSource),
+      /도구명은 source_id가 아닙니다/,
+    );
     const wrong = structuredClone(analysis);
     wrong.order_draft!.amounts!.total_krw = 1;
     assert.throws(() => validateAnalysis(store, run, wrong));

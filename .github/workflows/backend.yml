@@ -18,6 +18,7 @@ jobs:
       - run: npm run format:check
       - run: npm test
       - run: npm run build
+      - run: npm run web:build
       - run: python3 docs/samples/validate.py
       - run: python3 -m unittest discover -s docs/tests -v
       - run: git diff --check
