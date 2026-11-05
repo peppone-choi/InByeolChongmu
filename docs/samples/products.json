@@ -1,0 +1,115 @@
+{
+  "schema_version": "0.1",
+  "synthetic": true,
+  "seller_id": "sample-seller-01",
+  "reference_time": "2026-11-05T10:00:00+09:00",
+  "notice": "모든 인물·계정·주소·연락처·금액은 가상 샘플입니다. 실제 발송·외부 API 조회에 사용하지 마세요.",
+  "snapshot_id": "products-v1",
+  "products": [
+    {
+      "product_id": "P001",
+      "name": "니트 가디건",
+      "aliases": [
+        "니트가디건",
+        "니트 베지",
+        "가디건"
+      ],
+      "measurements_cm": {
+        "shoulder": 52,
+        "chest": 60,
+        "length": 68
+      },
+      "material": null,
+      "closes_at": "2026-11-08T23:59:00+09:00",
+      "variants": [
+        {
+          "sku": "K-BE",
+          "color": "베이지",
+          "size": "프리",
+          "unit_price_krw": 31000,
+          "stock_available": 4
+        },
+        {
+          "sku": "K-CR",
+          "color": "크림",
+          "size": "프리",
+          "unit_price_krw": 31000,
+          "stock_available": 2
+        },
+        {
+          "sku": "K-BK",
+          "color": "블랙",
+          "size": "프리",
+          "unit_price_krw": 33000,
+          "stock_available": 0
+        }
+      ]
+    },
+    {
+      "product_id": "P002",
+      "name": "공구 텀블러",
+      "aliases": [
+        "텀블러"
+      ],
+      "measurements_cm": null,
+      "material": "스테인리스",
+      "closes_at": "2026-11-04T23:59:00+09:00",
+      "variants": [
+        {
+          "sku": "T-NA",
+          "color": "네이비",
+          "size": "500ml",
+          "unit_price_krw": 18000,
+          "stock_available": 7
+        }
+      ]
+    },
+    {
+      "product_id": "P003",
+      "name": "울 가디건",
+      "aliases": [
+        "울가디건",
+        "가디건"
+      ],
+      "measurements_cm": {
+        "shoulder": 48,
+        "chest": 56,
+        "length": 64
+      },
+      "material": "울 혼방",
+      "closes_at": "2026-11-08T23:59:00+09:00",
+      "variants": [
+        {
+          "sku": "W-BE",
+          "color": "베이지",
+          "size": "프리",
+          "unit_price_krw": 59000,
+          "stock_available": 3
+        }
+      ]
+    },
+    {
+      "product_id": "P004",
+      "name": "캔버스 에코백",
+      "aliases": [
+        "에코백",
+        "캔버스백"
+      ],
+      "measurements_cm": {
+        "width": 35,
+        "height": 38
+      },
+      "material": "면",
+      "closes_at": "2026-11-08T23:59:00+09:00",
+      "variants": [
+        {
+          "sku": "B-CR",
+          "color": "크림",
+          "size": "단일",
+          "unit_price_krw": 22000,
+          "stock_available": 5
+        }
+      ]
+    }
+  ]
+}

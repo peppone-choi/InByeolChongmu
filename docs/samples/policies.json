@@ -1,0 +1,39 @@
+{
+  "schema_version": "0.1",
+  "synthetic": true,
+  "seller_id": "sample-seller-01",
+  "reference_time": "2026-11-05T10:00:00+09:00",
+  "notice": "모든 인물·계정·주소·연락처·금액은 가상 샘플입니다. 실제 발송·외부 API 조회에 사용하지 마세요.",
+  "snapshot_id": "policies-v1",
+  "policies": [
+    {
+      "policy_id": "POL-SHIPPING",
+      "rule": "샘플 주문당 배송비 3,000원, 무료배송·지역별 추가금 없음",
+      "shipping_fee_krw": 3000
+    },
+    {
+      "policy_id": "POL-DISCOUNT",
+      "rule": "P001 수량 합계가 2개 이상이면 주문당 3,000원 1회 할인. 다른 상품 수량은 합산하지 않으며 중복 할인 없음",
+      "product_id": "P001",
+      "minimum_quantity": 2,
+      "discount_krw": 3000
+    },
+    {
+      "policy_id": "POL-PAYMENT",
+      "rule": "입금자명 필수. 고객 입금 주장은 확인 근거가 아님. 판매자가 은행 앱에서 금액·입금자명을 확인하고 확정"
+    },
+    {
+      "policy_id": "POL-SHIP-DATE",
+      "rule": "샘플 기준 다음 출고 예정일은 2026-11-06. 입금 확인·주문 확정 후 적용. 도착일·현재 배송 상태는 보장하지 않음",
+      "next_dispatch_date": "2026-11-06"
+    },
+    {
+      "policy_id": "POL-EXCEPTION",
+      "rule": "환불·교환·보상·품절·마감 예외는 판매자가 판단. 시스템이 자동 승인하거나 재고를 복구하지 않음"
+    },
+    {
+      "policy_id": "POL-TONE",
+      "rule": "정중하고 짧은 존댓말. 이모지는 최대 1개. 근거 없는 착용감·도착일 약속 금지"
+    }
+  ]
+}

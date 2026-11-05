@@ -1,0 +1,197 @@
+{
+  "schema_version": "0.1",
+  "synthetic": true,
+  "seller_id": "sample-seller-01",
+  "reference_time": "2026-11-05T10:00:00+09:00",
+  "notice": "모든 인물·계정·주소·연락처·금액은 가상 샘플입니다. 실제 발송·외부 API 조회에 사용하지 마세요.",
+  "snapshot_id": "orders-v1",
+  "stock_note": "products.json 재고는 이 주문 스냅샷의 확정·발송·취소 처리를 이미 반영한 가용 재고입니다. 적재 시 다시 차감하지 않습니다.",
+  "orders": [
+    {
+      "order_id": "O-0001",
+      "customer_handle": "@sample.minji",
+      "recipient": {
+        "name": "샘플민지",
+        "phone_raw": "010-0000-0001",
+        "address_raw": "가상시 예시구 테스트로 10 샘플동 101호",
+        "postal_code": null
+      },
+      "depositor_name": "샘플민지",
+      "items": [
+        {
+          "sku": "T-NA",
+          "quantity": 1,
+          "unit_price_krw": 18000
+        }
+      ],
+      "amounts": {
+        "subtotal_krw": 18000,
+        "discount_krw": 0,
+        "shipping_fee_krw": 3000,
+        "total_krw": 21000
+      },
+      "status": "shipped",
+      "created_at": "2026-11-03T09:00:00+09:00",
+      "confirmed_at": "2026-11-03T10:00:00+09:00",
+      "carrier": "가상택배",
+      "tracking_number": "SAMPLE-TRACK-0001",
+      "shipped_at": "2026-11-04T15:00:00+09:00",
+      "version": 1
+    },
+    {
+      "order_id": "O-0002",
+      "customer_handle": "@sample.same1",
+      "recipient": {
+        "name": "샘플동명",
+        "phone_raw": "010-0000-0002",
+        "address_raw": "가상시 예시구 테스트로 20 샘플동 101호",
+        "postal_code": null
+      },
+      "depositor_name": "샘플동명",
+      "items": [
+        {
+          "sku": "K-BE",
+          "quantity": 1,
+          "unit_price_krw": 31000
+        }
+      ],
+      "amounts": {
+        "subtotal_krw": 31000,
+        "discount_krw": 0,
+        "shipping_fee_krw": 3000,
+        "total_krw": 34000
+      },
+      "status": "confirmed",
+      "created_at": "2026-11-04T09:00:00+09:00",
+      "confirmed_at": "2026-11-04T10:00:00+09:00",
+      "carrier": null,
+      "tracking_number": null,
+      "shipped_at": null,
+      "version": 1
+    },
+    {
+      "order_id": "O-0003",
+      "customer_handle": "@sample.same2",
+      "recipient": {
+        "name": "샘플동명",
+        "phone_raw": "010-0000-0003",
+        "address_raw": "가상시 예시구 테스트로 30 샘플동 101호",
+        "postal_code": null
+      },
+      "depositor_name": "샘플동명",
+      "items": [
+        {
+          "sku": "B-CR",
+          "quantity": 1,
+          "unit_price_krw": 22000
+        }
+      ],
+      "amounts": {
+        "subtotal_krw": 22000,
+        "discount_krw": 0,
+        "shipping_fee_krw": 3000,
+        "total_krw": 25000
+      },
+      "status": "confirmed",
+      "created_at": "2026-11-04T09:00:00+09:00",
+      "confirmed_at": "2026-11-04T10:00:00+09:00",
+      "carrier": null,
+      "tracking_number": null,
+      "shipped_at": null,
+      "version": 1
+    },
+    {
+      "order_id": "O-0004",
+      "customer_handle": "@sample.pending",
+      "recipient": {
+        "name": "샘플대기",
+        "phone_raw": "010-0000-0004",
+        "address_raw": "가상시 예시구 테스트로 40 샘플동 101호",
+        "postal_code": null
+      },
+      "depositor_name": "샘플대기",
+      "items": [
+        {
+          "sku": "K-CR",
+          "quantity": 1,
+          "unit_price_krw": 31000
+        }
+      ],
+      "amounts": {
+        "subtotal_krw": 31000,
+        "discount_krw": 0,
+        "shipping_fee_krw": 3000,
+        "total_krw": 34000
+      },
+      "status": "pending_payment",
+      "created_at": "2026-11-05T09:00:00+09:00",
+      "confirmed_at": null,
+      "carrier": null,
+      "tracking_number": null,
+      "shipped_at": null,
+      "version": 1
+    },
+    {
+      "order_id": "O-0005",
+      "customer_handle": "@sample.cancelled",
+      "recipient": {
+        "name": "샘플취소",
+        "phone_raw": "010-0000-0005",
+        "address_raw": "가상시 예시구 테스트로 50 샘플동 101호",
+        "postal_code": null
+      },
+      "depositor_name": "샘플취소",
+      "items": [
+        {
+          "sku": "B-CR",
+          "quantity": 1,
+          "unit_price_krw": 22000
+        }
+      ],
+      "amounts": {
+        "subtotal_krw": 22000,
+        "discount_krw": 0,
+        "shipping_fee_krw": 3000,
+        "total_krw": 25000
+      },
+      "status": "cancelled",
+      "created_at": "2026-11-04T09:00:00+09:00",
+      "confirmed_at": null,
+      "carrier": null,
+      "tracking_number": null,
+      "shipped_at": null,
+      "version": 1
+    },
+    {
+      "order_id": "O-0006",
+      "customer_handle": "@sample.ready",
+      "recipient": {
+        "name": "샘플준비",
+        "phone_raw": "010-0000-0006",
+        "address_raw": "가상시 예시구 테스트로 60 샘플동 101호",
+        "postal_code": null
+      },
+      "depositor_name": "샘플준비",
+      "items": [
+        {
+          "sku": "W-BE",
+          "quantity": 1,
+          "unit_price_krw": 59000
+        }
+      ],
+      "amounts": {
+        "subtotal_krw": 59000,
+        "discount_krw": 0,
+        "shipping_fee_krw": 3000,
+        "total_krw": 62000
+      },
+      "status": "confirmed",
+      "created_at": "2026-11-05T09:00:00+09:00",
+      "confirmed_at": "2026-11-05T10:00:00+09:00",
+      "carrier": null,
+      "tracking_number": null,
+      "shipped_at": null,
+      "version": 1
+    }
+  ]
+}
