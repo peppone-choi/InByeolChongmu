@@ -22,7 +22,7 @@ class SampleValidationTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
         shutil.copytree(ROOT / "docs", self.root / "docs", ignore=shutil.ignore_patterns("__pycache__"))
-        for name in ("README.md", "AGENTS.md"):
+        for name in ("README.md", "AGENTS.md", ".env.example"):
             shutil.copyfile(ROOT / name, self.root / name)
 
     def edit(self, name, mutate):

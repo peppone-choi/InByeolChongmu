@@ -1,0 +1,56 @@
+{
+  "name": "inbyeolchongmu",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=26.5.1 <27"
+  },
+  "scripts": {
+    "dev": "tsx watch src/http/server.ts",
+    "start": "node dist/http/server.js",
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src tests",
+    "format": "prettier --write src tests package.json tsconfig*.json eslint.config.js .prettierrc.json .github/workflows/backend.yml",
+    "format:check": "prettier --check src tests package.json tsconfig*.json eslint.config.js .prettierrc.json .github/workflows/backend.yml",
+    "test": "tsx --test tests/*.test.ts",
+    "db:seed": "tsx src/cli/main.ts seed",
+    "tools": "tsx src/cli/main.ts tools",
+    "chat": "tsx src/cli/main.ts chat",
+    "data:export": "tsx src/cli/main.ts export",
+    "data:import": "tsx src/cli/main.ts import",
+    "mcp": "tsx src/cli/main.ts mcp",
+    "db:backup": "tsx src/cli/main.ts backup"
+  },
+  "dependencies": {
+    "@flue/runtime": "2.3.0",
+    "@hono/node-server": "2.1.6",
+    "@modelcontextprotocol/sdk": "1.32.2",
+    "dotenv": "18.0.9",
+    "exceljs": "4.4.0",
+    "hono": "4.13.16",
+    "valibot": "1.5.0",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@types/node": "26.6.6",
+    "eslint": "10.14.0",
+    "prettier": "3.9.10",
+    "tsx": "4.23.15",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.72.1"
+  },
+  "overrides": {
+    "@flue/runtime": {
+      "@modelcontextprotocol/client": "2.4.0",
+      "@earendil-works/pi-ai": "1.1.0",
+      "@earendil-works/pi-agent-core": "1.1.0"
+    },
+    "minimatch@>=7 <11.0.1": "11.0.4",
+    "exceljs": {
+      "uuid": "11.1.1"
+    }
+  }
+}
