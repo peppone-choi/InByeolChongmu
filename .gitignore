@@ -1,2 +1,12 @@
 __pycache__/
 *.py[cod]
+node_modules/
+dist/
+.local/
+.env
+.env.*
+!.env.example
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+coverage/
