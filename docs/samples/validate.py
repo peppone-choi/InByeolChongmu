@@ -62,6 +62,35 @@ def timestamp(value):
     return parsed
 
 
+def render_conversation(conversation):
+    labels = {"customer": "고객", "seller": "판매자"}
+    require(isinstance(conversation, list) and bool(conversation), "대화 원본 누락")
+    for message in conversation:
+        require(set(message) == {"role", "text"} and message["role"] in labels,
+                "대화 역할 오류")
+        require(isinstance(message["text"], str), "대화 본문 타입 오류")
+    require(conversation[-1]["role"] == "customer", "마지막 발화는 고객이어야 합니다")
+    return "\n".join(f"[{labels[m['role']]}] {m['text']}" for m in conversation if m["text"].strip())
+
+
+def dm_preview(cases):
+    selected = ["DM-002", "DM-022", "DM-023", "DM-024", "DM-025", "DM-028", "DM-036", "DM-040"]
+    lines = ["# 인스타 DM 스타일 가상 대화 예시", "",
+             f"실제 고객 DM이 아닌 가상 대화입니다. 전체 {len(cases)}건과 기대값의 기준은 [JSON 원본](dm-cases.json)입니다.", "",
+             "이 문서는 원본에서 뽑은 대표 8건입니다. 어투와 정정·생략·중복 전송의 맥락을 함께 확인하세요.", ""]
+    for case_id in selected:
+        case = cases[case_id]
+        lines.extend([f"## {case_id} · {case['scenario']}", ""])
+        for message in case["conversation"]:
+            role = "고객" if message["role"] == "customer" else "판매자"
+            lines.extend([f"> **{role}**: " + message["text"].replace("\n", "\n> "), ">"])
+        expected = case["expected"]
+        lines.extend(["", f"기대 판단: `{expected['classification']}` / `{expected['status']}`.", ""])
+        if "notes" in expected:
+            lines.extend([" ".join(expected["notes"]), ""])
+    return "\n".join(lines)
+
+
 def shipment_example(data, orders):
     """명령 예시의 계약만 확인한다. 상태 전이 서비스는 실행하지 않는다."""
     request, response = data["request"], data["expected_response"]
@@ -141,6 +170,10 @@ def main(root=ROOT):
     request_ids = []
     for case in cases.values():
         request, expected = case["input"], case["expected"]
+        require(isinstance(case["scenario"], str) and bool(case["scenario"].strip()), "대화 시나리오 누락")
+        require(isinstance(case["tags"], list) and bool(case["tags"])
+                and all(isinstance(tag, str) and tag.strip() for tag in case["tags"]), "대화 태그 오류")
+        require(request["text"] == render_conversation(case["conversation"]), "대화 원본·분석 입력 불일치")
         request_ids.append(request["request_id"])
         require(request["reference_time"] == cases_file["reference_time"], "DM 시각 불일치")
         require(request["seller_id"] == cases_file["seller_id"], "DM 판매자 불일치")
@@ -163,6 +196,8 @@ def main(root=ROOT):
             require(amounts(items, discount_rule, shipping)["total_krw"] == expected["total_krw"],
                     f"{case['case_id']} 기대 금액 오류")
     require(len(request_ids) == len(set(request_ids)), "요청 ID 중복")
+    require((samples / "dm-examples.md").read_text(encoding="utf-8") == dm_preview(cases),
+            "대화 미리보기·JSON 원본 불일치")
 
     example = load("analysis-example.json", samples)
     expected = cases["DM-002"]["expected"]
@@ -176,6 +211,11 @@ def main(root=ROOT):
     require(example["request_id"] == cases["DM-002"]["input"]["request_id"], "예시 요청 불일치")
     require(example["schema_version"] == "0.1", "출력 계약 버전 오류")
     require(example["state_mutation_allowed"] is False, "분석의 상태 변경 금지 오류")
+    for path, value in expected.get("extracted_fields", {}).items():
+        actual_value = example["order_draft"]
+        for key in path.split("."):
+            actual_value = actual_value[key]
+        require(type(actual_value) is type(value) and actual_value == value, "출력 예시 추출 필드 불일치")
     actual_items = example["order_draft"]["items"]
     actual = unique(actual_items, "sku")
     expected_quantities = dict(zip(expected["matched_skus"], expected["quantities"]))

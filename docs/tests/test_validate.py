@@ -146,6 +146,28 @@ class SampleValidationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "깨진 링크"):
             self.check()
 
+    def test_reject_conversation_input_drift(self):
+        self.reject("dm-cases.json", lambda d: d["cases"][1]["input"].update(
+            text="주문 내용이 다른 입력"), "대화 원본·분석 입력 불일치")
+
+    def test_reject_unknown_speaker(self):
+        self.reject("dm-cases.json", lambda d: d["cases"][1]["conversation"][0].update(
+            role="system"), "대화 역할 오류")
+
+    def test_reject_seller_as_final_message(self):
+        self.reject("dm-cases.json", lambda d: d["cases"][1]["conversation"][-1].update(
+            role="seller"), "마지막 발화는 고객")
+
+    def test_reject_preview_drift(self):
+        with (self.root / "docs/samples/dm-examples.md").open("a", encoding="utf-8") as output:
+            output.write("\n원본에 없는 대화\n")
+        with self.assertRaisesRegex(ValueError, "미리보기·JSON 원본 불일치"):
+            self.check()
+
+    def test_reject_recipient_drift_in_complete_example(self):
+        self.reject("analysis-example.json", lambda d: d["order_draft"]["recipient"].update(
+            phone_raw="010-0000-9999"), "추출 필드 불일치")
+
 
 if __name__ == "__main__":
     unittest.main()

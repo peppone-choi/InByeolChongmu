@@ -12,7 +12,9 @@
 
 ## 자료와 인수조건 추적
 
-[DM 20건](samples/dm-cases.json)의 `expected`는 필수 검증 항목입니다. `DM-002`만 [완전한 출력 예시](samples/analysis-example.json)가 있으며 나머지는 고정 문자열 정답이 아닙니다. `must_not_claim` 문자열 금지만으로 환각 여부를 판정하지 말고 근거와 의미를 함께 검토합니다.
+[DM 40건](samples/dm-cases.json)의 `expected`는 필수 검증 항목입니다. `DM-002`만 [완전한 출력 예시](samples/analysis-example.json)가 있으며 나머지는 고정 문자열 정답이 아닙니다. `must_not_claim` 문자열 금지만으로 환각 여부를 판정하지 말고 근거와 의미를 함께 검토합니다.
+
+어투·복수 발화·정정·생략·중복 전송·혼합 문의도 평가합니다. `conversation`과 `input.text`, [대표 대화 미리보기](samples/dm-examples.md)의 일치 여부를 자동 검사하며, 대화 원본은 실제 수집 DM이 아닌 가상 자료입니다. AC-22~23의 의미·분류 품질은 서비스 구현 후 별도로 실행합니다.
 
 [인수조건](acceptance-criteria.md)의 모든 AC를 실행 결과에 연결합니다. DM만으로 만들 수 없는 동시 확정·재내보내기·자료 버전 충돌·주소 API 장애는 별도 서비스 시나리오로 작성합니다.
 
@@ -30,8 +32,10 @@
 
 ## 현재 수행한 자료 검사
 
-2026-11-05 `python3 docs/samples/validate.py`로 상품 4종·SKU 6개·주문 6건·DM 20건·분석 출력 1건·발송 계약 예시 1건·Markdown 15개의 자료 검사를 수행합니다. `python3 -m unittest discover -s docs/tests -v`는 [회귀 검사](tests/test_validate.py)를 실행합니다.
+2026-11-05 `python3 docs/samples/validate.py`로 상품 4종·SKU 6개·주문 6건·DM 40건·분석 출력 1건·발송 계약 예시 1건·Markdown 16개의 자료 검사를 수행합니다. `python3 -m unittest discover -s docs/tests -v`는 [회귀 검사](tests/test_validate.py)를 실행합니다.
 
 회귀 범위: 정상 자료·품목 순서 변경·과거 단가/할인/배송비 변경 허용, SKU·상품 연결·가격·수량 변조 거절, 중복 품목·실수/불리언 숫자·근거 스냅샷 오류·잘못된 과거 합계·음수/과도한 할인 거절, 발송 명령 예시의 미확정 주문·필수값·버전·확정 전/미래/시간대 없는 시각·재고 변경 표시 오류 거절, 중복 SKU·깨진 링크 거절입니다.
+
+추가 회귀 범위: 대화 원본과 분석 입력 불일치, 허용하지 않는 발화 역할, 판매자로 끝나는 입력, 미리보기와 원본 불일치, 완전한 출력의 수령인 추출값 변조를 거절합니다.
 
 이는 자료 검사 결과입니다. 모델 호출·화면 E2E·주문 상태 변경·동시성·주소 API·택배 업로드·실제 50건 평가와 제품 AC는 모두 미실행입니다.
