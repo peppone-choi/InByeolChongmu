@@ -12,15 +12,17 @@
 
 ## 프로젝트 구조와 모듈 구성
 
-이 저장소는 로컬 백엔드와 자료 도구를 구현한 단계입니다. `src/http`는 Hono API, `src/storage`는 SQLite와 상품 XLSX, `src/tools`는 읽기·계산 도구와 MCP stdio, `src/agent`는 채팅 수신 서비스와 Flue 도구/에이전트 팩터리, `src/domain`은 입력·출력 검증입니다. `src/cli`는 같은 기능의 CLI이며 `tests/backend.test.ts`는 Node 표준 테스트입니다. 실제 모델 실행기는 아직 연결하지 않았습니다.
+이 저장소는 로컬 백엔드와 자료 도구를 구현한 단계입니다. `src/http`는 Hono API, `src/storage`는 SQLite와 상품 XLSX, `src/tools`는 읽기·계산 도구와 MCP stdio, `src/agent`는 채팅 수신 서비스와 Flue 도구/에이전트 팩터리, `src/domain`은 입력·출력 검증입니다. `src/cli`는 같은 기능의 CLI이며 `tests/backend.test.ts`는 Node 표준 테스트입니다. `src/agent/flue-runner.ts`가 실제 Flue 실행기, `runtime-agent.ts`가 방 맥락·도구·제출 계약, `typesafe.ts`가 Jev 분류 연결입니다. `Dockerfile`과 `compose.yaml`은 단일 서버 배포를 제공합니다.
 
-`README.md`는 실행·지원 상태, `docs/backend.md`는 실제 API·저장·도구 계약, `docs/implementation-plan.md`는 남은 에이전트 연결 계획입니다. `docs/samples/`의 가상 자료와 Python 검사·회귀 테스트도 유지합니다.
+`README.md`는 실행·지원 상태, `docs/backend.md`는 실제 API·저장·도구 계약, `docs/implementation-plan.md`는 구현 결정과 남은 연결·품질 평가 계획입니다. `docs/samples/`의 가상 자료와 Python 검사·회귀 테스트도 유지합니다.
 
 ## 빌드·테스트·개발 명령어
 
 Node.js `26.5.1` 이상 `27` 미만과 npm을 사용합니다. `npm ci`, `npm run dev`, `npm run build`, `npm start`가 설치·개발·빌드·실행 명령입니다. `npm run typecheck`, `npm run lint`, `npm run format:check`, `npm test`로 검증합니다. Node 내장 SQLite API 버전 변화는 실제 실행으로 검증하세요.
 
 문서·샘플 변경 후 `python3 docs/samples/validate.py`, `python3 -m unittest discover -s docs/tests -v`, `git diff --check`를 실행하세요. 샘플·회귀 검사나 모델 없는 백엔드 테스트를 제품 AI 품질 검증 통과로 보고하지 마세요.
+
+Docker는 `docker compose up -d --build`이며 32자 이상 `LOCAL_API_TOKEN`이 필수입니다. 두 DB를 같은 영속 볼륨에 두고 이미지에 env·DB를 복사하지 마세요. 단일 Node 프로세스만 지원합니다.
 
 DB·상품 XLSX·MCP 명령은 `docs/backend.md`를 따릅니다. 파일 SQLite를 기본으로, `:memory:`는 테스트용으로 사용합니다. 실제 고객 자료·운영 DB에 seed·테스트를 실행하지 마세요. `.env.local` → `.env` → 셸 환경 변수 순서로 우선하며 비밀 값·DB·백업·개인정보를 커밋하지 마세요. `.env.example`은 빈 키 이름만 제공합니다.
 
@@ -32,7 +34,7 @@ DB·상품 XLSX·MCP 명령은 `docs/backend.md`를 따릅니다. 파일 SQLite�
 
 ## 테스트 지침
 
-문서·자료 검사 도구의 회귀 검증은 Python 표준 `unittest`와 `docs/tests/test_*.py`를 사용합니다. 백엔드 테스트는 Node 표준 `node:test`를 tsx로 실행합니다. 재시작 보존·자료 범위·대화방 분리·중복 요청·MCP 도구 호출·XLSX 원자성을 검증하며 모델 성능·주문 승인 상태 전이와 구분합니다. 최소 커버리지 수치는 아직 정하지 않았습니다.
+문서·자료 검사 도구의 회귀 검증은 Python 표준 `unittest`와 `docs/tests/test_*.py`를 사용합니다. 백엔드 테스트는 Node 표준 `node:test`를 tsx로 실행합니다. 재시작 보존·자료 범위·대화방 분리·중복 요청·MCP 도구 호출·XLSX 원자성을 검증하며 모델 성능·주문 승인 상태 전이와 구분합니다. Flue 테스트는 실제 실행기와 스크립트 모델로 도구 호출·출력 거절·호출 한도·중단·재전송을 검증하며 실제 모델 품질과 구분합니다. 최소 커버리지 수치는 아직 정하지 않았습니다.
 
 현재 분석 출력은 상품표·기대값과 독립 대조하고, 과거 주문은 저장 당시 금액으로 산술을 검증하세요. 현재 정책으로 과거 주문을 다시 계산하지 마세요. 발송 등록·정정 계약과 자료 예시 검증을 실제 서비스의 상태 전이 검증으로 혼동하지 마세요.
 
@@ -44,7 +46,7 @@ DM 샘플의 `conversation`을 원본으로 유지하고 분석용 `input.text`�
 
 ## AI 기능 구현 시 지침
 
-사용자가 키 설정과 실제 모델 검증을 후속으로 미뤘으므로, 키 없이 실행 가능한 백엔드·도구 작업을 막지 마세요. 모델 미연결 응답을 정상 분석으로 대체하거나 키를 자동 생성하지 마세요.
+키는 `.env.local`의 `OPENAI_API_KEY`·`TYPESAFE_API_KEY`로 받으며 값은 출력하거나 커밋하지 마세요. 기본 `AGENT_BACKEND=disabled`로 키 없이 자료 도구를 사용할 수 있습니다. 실제 호출은 `flue`와 모델·키를 설정해야 하며 `npm run verify:agent`는 명시적으로 실행하는 유료 가상 자료 연결 검사입니다. 자동 테스트에서 로컬 키를 사용하지 마세요.
 
 Flue·Jev·Hermes·OpenAI Agents API·AI Gateway가 사용자가 지정한 우선 활용 기술군입니다. `docs/implementation-plan.md`의 역할·연결 검증 계획을 따르고, 도구를 쓸 수 있는 실행기를 단순 모델 호출 코드로 대체한다고 임의로 결정하지 마세요. 실행기 중복·게이트웨이 호환성·앱 자체의 자료 접근 권한은 실제로 검증하고, 연결되지 않은 도구를 사용 가능으로 표시하지 마세요.
 

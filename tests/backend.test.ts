@@ -28,7 +28,14 @@ const clock = () => new Date('2026-11-05T10:00:00+09:00');
 function setup(path = ':memory:') {
   const store = new Store(path);
   store.seedSamples(root, seller);
-  const config = readConfig(root, { NODE_ENV: 'test', DATABASE_PATH: path });
+  const config = readConfig(root, {
+    NODE_ENV: 'test',
+    DATABASE_PATH: path,
+    AGENT_BACKEND: 'disabled',
+    LOCAL_API_TOKEN: '',
+    OPENAI_API_KEY: '',
+    TYPESAFE_API_KEY: '',
+  });
   return {
     store,
     config,

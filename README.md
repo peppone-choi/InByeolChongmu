@@ -21,22 +21,22 @@
 
 ## 진행 상황
 
-**2026-11-05 기준: 로컬 백엔드·SQLite·대화방 저장·자료 도구·MCP 연결을 구현했습니다. 실제 모델 실행과 답장 생성은 아직 연결하지 않았습니다.**
+**2026-11-05 기준: 채팅 API에 Flue 실행기를 연결했습니다. OpenAI가 대화방 맥락을 읽어 자료 도구를 호출하고, TypeSafe Jev 분류와 코드 검증을 거친 분석·답장 초안을 반환합니다. Docker 단일 컨테이너 실행도 지원합니다.**
 
 ### 지금 되는 것
 
 - Hono 채팅 API로 고객별 대화방을 만들고 메시지를 SQLite에 저장합니다. 같은 고객의 다른 상담 방, 다른 판매자의 자료를 구분하고 중복 요청을 거절하거나 재사용합니다.
 - 상품·정책·주문 가상 JSON을 실제 SQLite에 적재해 읽습니다. 가격·할인·배송비 계산, 판매 일정 조회와 허용 문서 파일 읽기가 동작합니다.
-- 도구 6개를 HTTP·CLI·MCP stdio로 호출할 수 있습니다. 같은 구현을 Flue 도구와 에이전트 팩터리에 연결했습니다. 모델이 도구를 선택하는 실행은 아직 검증하지 않았습니다.
+- 자료 도구 6개를 HTTP·CLI·MCP stdio·Flue에서 사용합니다. Flue가 도구를 선택해 실제 SQLite·문서를 읽고 `submit_analysis`로 검증된 결과를 제출합니다. TypeSafe 키가 있으면 `classify_inquiry`도 사용합니다.
 - 상품표를 XLSX로 내려받아 편집하고 검증 후 가져올 수 있습니다. 파일 SQLite는 재시작 후 보존하고 인메모리는 테스트에 사용합니다. 별도 DB 서버는 필요 없습니다.
 - `.env.local`과 `.env`로 설정을 받습니다. 필요한 키 이름은 [.env.example](.env.example)에 있으며 키 없이 서버·도구 검증을 실행할 수 있습니다.
 - [제작 문서](docs/README.md), [부트스트랩 계획](docs/implementation-plan.md), 가상 DM 40건과 자료 검사·회귀 검증을 확인할 수 있습니다.
 
 ### 아직 안 되는 것
 
-- 실제 모델·Jev·Hermes·OpenAI Agents API·AI Gateway 호출과 외부 계정 연결은 미검증입니다. 텍스트 채팅 수신은 저장 후 `503 / MODEL_NOT_CONNECTED`를 반환하며 초안·분류를 생성했다고 표시하지 않습니다.
+- Hermes·OpenAI Agents API·AI Gateway 추론 경로와 업무 캘린더·Sheets 계정 연결은 후속입니다. 현재 실행 경로는 Flue → OpenAI 직접 호출이며, Jev는 별도의 분류 도구입니다.
 - 주문 후보 저장·판매자 확정·재고 차감·수동 발송·택배 양식 내보내기·여러 건 분석·웹 화면은 미구현입니다. 상품 편집 XLSX는 택배 양식이 아닙니다.
-- 운영 인증·보관/삭제 정책·다중 서버 배포는 없습니다. 로컬 가상 자료로만 사용합니다.
+- Docker는 단일 서버·영속 볼륨·Bearer 토큰으로 실행합니다. 사용자별 운영 인증·보관/삭제 정책·다중 서버 공유는 없으므로 실제 고객 자료나 공개 서비스에 사용하기 전 추가 구현이 필요합니다.
 
 ### 설치와 실행
 
@@ -49,9 +49,23 @@ npm run db:seed
 npm run dev
 ```
 
-기존 `.env.local`이 있으면 복사로 덮어쓰지 마세요. API는 `http://127.0.0.1:3000`에서 실행합니다. `.env.local` → `.env` 순서로 읽으며 셸 환경 변수가 우선합니다. 기본 DB는 `.local/inbyeol.sqlite`이며 키를 채워도 모델 호출을 자동 시작하지 않습니다.
+기존 `.env.local`이 있으면 복사로 덮어쓰지 마세요. API는 `http://127.0.0.1:3000`에서 실행합니다. `.env.local` → `.env` 순서로 읽으며 셸 환경 변수가 우선합니다. 기본 DB는 `.local/inbyeol.sqlite`이며 `AGENT_BACKEND=flue`, `AGENT_MODEL=openai/gpt-5.5`, `OPENAI_API_KEY`를 설정하면 채팅 요청에서 모델을 호출합니다. `TYPESAFE_API_KEY`는 선택 사항입니다. 기본 `disabled`에서는 자료 도구만 사용하고 채팅은 저장 후 `503`을 반환합니다.
 
 `npm run build` / `npm start`로 컴파일·실행하고 `npm run typecheck`, `npm run lint`, `npm run format:check`, `npm test`로 검사합니다. 상세 API·도구·대화방·엑셀·백업 명령과 현재 한계는 [백엔드 사용법](docs/backend.md)에 있습니다.
+
+### Docker와 실제 모델 검증
+
+`.env.local`에 위 설정과 32자 이상 무작위 `LOCAL_API_TOKEN`을 넣은 뒤 실행합니다. 키와 DB는 이미지에 넣지 않습니다.
+
+```sh
+docker compose up -d --build
+docker compose logs --tail=20 api
+docker compose down
+```
+
+포트는 `127.0.0.1:3000`으로 공개하며 모든 API에 Bearer 토큰이 필요합니다. 두 SQLite 파일은 `inbyeol-data` 볼륨에 보존됩니다. `down -v`는 자료를 삭제하므로 사용하지 마세요. 외부 배포에는 별도 HTTPS·운영 인증이 필요합니다. 상세 설정·백업은 [백엔드 사용법](docs/backend.md#docker-실행)을 따릅니다.
+
+`npm run verify:agent`는 env 키를 사용해 **유료 실제 호출**을 실행합니다. 격리된 가상 자료와 2026-11-05 기준 시각으로 대화 맥락·62,000원 계산·TypeSafe 도구·중복 재전송·원본 보존을 확인하고 임시 DB를 정리합니다. 자동 CI에는 포함하지 않습니다. 소량 연결 검증이며 가상 DM 40건 전체·실제 DM 50건 품질 평가를 대체하지 않습니다.
 
 ### 첫 버전에서 제외하는 것
 
