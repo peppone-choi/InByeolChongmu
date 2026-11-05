@@ -1,0 +1,26 @@
+services:
+  api:
+    build: .
+    init: true
+    env_file: .env.local
+    environment:
+      NODE_ENV: production
+      APP_DEPLOYMENT: container
+      PORT: 3000
+      DATABASE_PATH: /app/.local/inbyeol.sqlite
+      FLUE_DATABASE_PATH: /app/.local/flue.sqlite
+    ports:
+      - '127.0.0.1:3000:3000'
+    volumes:
+      - inbyeol-data:/app/.local
+    restart: unless-stopped
+    stop_grace_period: 75s
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+volumes:
+  inbyeol-data:

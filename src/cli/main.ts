@@ -2,6 +2,7 @@ import { resolve } from 'node:path';
 import { readFile } from 'node:fs/promises';
 import { bootstrap } from '../bootstrap.js';
 import { Tools, toolCatalog } from '../tools/registry.js';
+import { FlueRunner } from '../agent/flue-runner.js';
 import { ChatService } from '../agent/service.js';
 import { importProducts, exportProducts } from '../storage/workbook.js';
 import { serveMcp } from '../tools/mcp.js';
@@ -9,6 +10,7 @@ import { AppError } from '../domain/errors.js';
 const { store, config } = bootstrap();
 const [command, name, ...rest] = process.argv.slice(2);
 let keepOpen = false;
+const runner = new FlueRunner(store, config);
 try {
   if (command === 'mcp') {
     keepOpen = true;
@@ -48,7 +50,7 @@ try {
         'INPUT_REQUIRED',
         '채팅 요청 JSON 파일 경로가 필요합니다.',
       );
-    const result = await new ChatService(store, config).receive(
+    const result = await new ChatService(store, config, runner).receive(
       JSON.parse(await readFile(resolve(name), 'utf8')),
     );
     console.log(JSON.stringify(result.body, null, 2));
@@ -84,5 +86,8 @@ try {
   );
   process.exitCode = 1;
 } finally {
-  if (!keepOpen) store.close();
+  if (!keepOpen) {
+    await runner.stop();
+    store.close();
+  }
 }

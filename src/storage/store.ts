@@ -3,6 +3,8 @@ import { createHash, randomUUID } from 'node:crypto';
 import { chmodSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { z } from 'zod';
+import type { Analysis } from '../domain/schema.js';
+import type { AgentRun, RunInput, ToolTrace } from '../agent/types.js';
 import { AppError } from '../domain/errors.js';
 import {
   productSchema,
@@ -62,7 +64,11 @@ export class Store {
       CREATE TABLE IF NOT EXISTS conversations(id TEXT PRIMARY KEY, seller_id TEXT NOT NULL, customer_handle TEXT NOT NULL, context_label TEXT NOT NULL, created_at TEXT NOT NULL) STRICT;
       CREATE INDEX IF NOT EXISTS conversation_scope ON conversations(seller_id,customer_handle);
       CREATE TABLE IF NOT EXISTS messages(id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL REFERENCES conversations(id), seller_id TEXT NOT NULL, request_id TEXT NOT NULL, fingerprint TEXT NOT NULL, role TEXT NOT NULL CHECK(role IN ('customer','assistant')), text TEXT NOT NULL, created_at TEXT NOT NULL, UNIQUE(seller_id,request_id,role)) STRICT;
-      INSERT OR IGNORE INTO schema_migrations VALUES(1);`);
+      INSERT OR IGNORE INTO schema_migrations VALUES(1);
+      CREATE TABLE IF NOT EXISTS agent_runs(id TEXT PRIMARY KEY,seller_id TEXT NOT NULL,request_id TEXT NOT NULL,conversation_id TEXT NOT NULL REFERENCES conversations(id),status TEXT NOT NULL CHECK(status IN ('running','succeeded','failed')),input TEXT NOT NULL CHECK(json_valid(input)),analysis TEXT,proposed TEXT,http_status INTEGER,model_calls INTEGER NOT NULL DEFAULT 0,UNIQUE(seller_id,request_id)) STRICT;
+      CREATE UNIQUE INDEX IF NOT EXISTS one_active_room_run ON agent_runs(seller_id,conversation_id) WHERE status='running';
+      CREATE TABLE IF NOT EXISTS agent_tool_calls(run_id TEXT NOT NULL REFERENCES agent_runs(id),call_id TEXT NOT NULL,name TEXT NOT NULL,success INTEGER NOT NULL,result TEXT NOT NULL CHECK(json_valid(result)),PRIMARY KEY(run_id,call_id)) STRICT;
+      INSERT OR IGNORE INTO schema_migrations VALUES(2);`);
   }
   close() {
     this.db.close();
@@ -355,6 +361,215 @@ export class Store {
         )
         .all(sellerId, conversationId) as unknown as Message[]
     ).reverse();
+  }
+  runForRequest(sellerId: string, requestId: string): AgentRun | null {
+    const row = this.db
+      .prepare('SELECT * FROM agent_runs WHERE seller_id=? AND request_id=?')
+      .get(sellerId, requestId);
+    return row ? this.decodeRun(row) : null;
+  }
+  runById(id: string): AgentRun {
+    const row = this.db.prepare('SELECT * FROM agent_runs WHERE id=?').get(id);
+    if (!row)
+      throw new AppError('RUN_NOT_FOUND', '분석 실행을 찾을 수 없습니다.', 404);
+    return this.decodeRun(row);
+  }
+  private decodeRun(row: Record<string, unknown>): AgentRun {
+    return {
+      ...row,
+      input: JSON.parse(String(row.input)),
+      analysis: row.analysis ? JSON.parse(String(row.analysis)) : null,
+      proposed: row.proposed ? JSON.parse(String(row.proposed)) : null,
+    } as AgentRun;
+  }
+  roomRunning(sellerId: string, conversationId: string, requestId?: string) {
+    return !!this.db
+      .prepare(
+        "SELECT 1 FROM agent_runs WHERE seller_id=? AND conversation_id=? AND status='running' AND request_id<>?",
+      )
+      .get(sellerId, conversationId, requestId ?? '');
+  }
+  beginRun(
+    sellerId: string,
+    requestId: string,
+    limits: { messages: number; characters: number; timeoutMs?: number },
+    now: Date,
+  ): AgentRun {
+    return this.transaction(() => {
+      const existing = this.runForRequest(sellerId, requestId);
+      if (existing) return existing;
+      const message = this.db
+        .prepare(
+          "SELECT * FROM messages WHERE seller_id=? AND request_id=? AND role='customer'",
+        )
+        .get(sellerId, requestId);
+      if (!message)
+        throw new AppError('MESSAGE_NOT_FOUND', '수신 메시지가 없습니다.', 404);
+      const room = this.conversation(sellerId, String(message.conversation_id));
+      if (this.roomRunning(sellerId, room.id, requestId))
+        throw new AppError(
+          'ROOM_BUSY',
+          '이 방의 이전 분석이 진행 중입니다.',
+          409,
+          true,
+        );
+      const history = this.db
+        .prepare(
+          `SELECT m.role,m.text,m.request_id FROM messages m
+        JOIN messages c ON c.seller_id=m.seller_id AND c.request_id=m.request_id AND c.role='customer'
+        WHERE m.seller_id=? AND m.conversation_id=? AND c.rowid<=(SELECT rowid FROM messages WHERE id=?)
+        ORDER BY c.rowid DESC,CASE m.role WHEN 'customer' THEN 0 ELSE 1 END DESC LIMIT 400`,
+        )
+        .all(
+          sellerId,
+          room.id,
+          message.id as string,
+        ) as unknown as RunInput['history'];
+      history.reverse();
+      // The current request must remain complete; never silently cut off its address or correction.
+      const chosen: RunInput['history'] = [];
+      let characters = 0;
+      for (const entry of [...history].reverse()) {
+        if (
+          chosen.length >= limits.messages ||
+          characters + entry.text.length > limits.characters
+        )
+          break;
+        chosen.unshift(entry);
+        characters += entry.text.length;
+      }
+      if (
+        !chosen.some(
+          (entry) =>
+            entry.request_id === requestId && entry.role === 'customer',
+        )
+      )
+        throw new AppError(
+          'CONTEXT_TOO_LARGE',
+          '현재 메시지를 담기에는 대화 맥락 한도가 작습니다.',
+          413,
+        );
+      const id = randomUUID();
+      const input: RunInput = {
+        run_id: id,
+        request_id: requestId,
+        conversation_id: room.id,
+        customer_handle: room.customer_handle,
+        context_label: room.context_label,
+        reference_time: now.toISOString(),
+        expires_at: new Date(
+          Date.now() + (limits.timeoutMs ?? 60000),
+        ).toISOString(),
+        snapshots: {
+          products: this.source(sellerId, 'product').snapshot_id,
+          policies: this.source(sellerId, 'policy').snapshot_id,
+          orders: this.source(sellerId, 'order').snapshot_id,
+        },
+        history: chosen,
+        context_truncated: chosen.length < history.length,
+      };
+      this.db
+        .prepare(
+          "INSERT INTO agent_runs(id,seller_id,request_id,conversation_id,status,input) VALUES(?,?,?,?,'running',?)",
+        )
+        .run(id, sellerId, requestId, room.id, JSON.stringify(input));
+      return this.runById(id);
+    });
+  }
+  countModelCall(id: string, maximum: number) {
+    const changed = this.db
+      .prepare(
+        "UPDATE agent_runs SET model_calls=model_calls+1 WHERE id=? AND status='running' AND model_calls<?",
+      )
+      .run(id, maximum).changes;
+    if (!changed)
+      throw new AppError(
+        'MODEL_CALL_LIMIT',
+        '모델 호출 한도를 초과했습니다.',
+        503,
+      );
+  }
+  traceTool(
+    id: string,
+    callId: string,
+    name: string,
+    success: boolean,
+    result: unknown,
+    maximum: number,
+  ) {
+    if (this.runById(id).status !== 'running')
+      throw new AppError(
+        'RUN_FINISHED',
+        '종료된 실행의 도구 호출은 허용하지 않습니다.',
+        409,
+      );
+    const count = this.db
+      .prepare(
+        'SELECT COUNT(*) AS n FROM agent_tool_calls WHERE run_id=? AND call_id<>?',
+      )
+      .get(id, callId);
+    if (Number(count?.n) >= maximum)
+      throw new AppError(
+        'TOOL_CALL_LIMIT',
+        '도구 호출 한도를 초과했습니다.',
+        503,
+      );
+    this.db
+      .prepare('INSERT OR REPLACE INTO agent_tool_calls VALUES(?,?,?,?,?)')
+      .run(id, callId, name, success ? 1 : 0, JSON.stringify(result));
+  }
+  traces(id: string): ToolTrace[] {
+    return this.db
+      .prepare(
+        'SELECT call_id,name,success,result FROM agent_tool_calls WHERE run_id=? ORDER BY rowid',
+      )
+      .all(id)
+      .map((row) => ({
+        call_id: String(row.call_id),
+        name: String(row.name),
+        success: !!row.success,
+        result: JSON.parse(String(row.result)) as unknown,
+      }));
+  }
+  proposeAnalysis(id: string, analysis: Analysis) {
+    const changed = this.db
+      .prepare(
+        "UPDATE agent_runs SET proposed=? WHERE id=? AND status='running'",
+      )
+      .run(JSON.stringify(analysis), id).changes;
+    if (!changed)
+      throw new AppError('RUN_FINISHED', '이미 종료된 실행입니다.', 409);
+  }
+  finishRun(id: string, analysis: Analysis, httpStatus: number) {
+    return this.transaction(() => {
+      const run = this.runById(id);
+      if (run.status !== 'running') return run;
+      this.db
+        .prepare(
+          'UPDATE agent_runs SET status=?,analysis=?,http_status=? WHERE id=?',
+        )
+        .run(
+          httpStatus === 200 ? 'succeeded' : 'failed',
+          JSON.stringify(analysis),
+          httpStatus,
+          id,
+        );
+      if (httpStatus === 200 && analysis.reply_draft) {
+        this.db
+          .prepare('INSERT OR IGNORE INTO messages VALUES(?,?,?,?,?,?,?,?)')
+          .run(
+            randomUUID(),
+            run.conversation_id,
+            run.seller_id,
+            run.request_id,
+            'assistant-draft',
+            'assistant',
+            analysis.reply_draft,
+            new Date().toISOString(),
+          );
+      }
+      return this.runById(id);
+    });
   }
   async backupTo(path: string) {
     if (this.path !== ':memory:' && resolve(path) === resolve(this.path))

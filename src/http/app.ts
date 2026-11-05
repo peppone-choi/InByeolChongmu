@@ -4,23 +4,31 @@ import { bodyLimit } from 'hono/body-limit';
 import { z } from 'zod';
 import type { Config } from '../config.js';
 import { AppError } from '../domain/errors.js';
+import type { AgentRunner } from '../agent/types.js';
 import { ChatService } from '../agent/service.js';
 import { Store } from '../storage/store.js';
 import { Tools, toolCatalog } from '../tools/registry.js';
 export function createApp(
   store: Store,
   config: Config,
-  options: { maxRequests?: number } = {},
+  options: {
+    maxRequests?: number;
+    runner?: AgentRunner;
+    clock?: () => Date;
+  } = {},
 ) {
   const app = new Hono();
-  const chat = new ChatService(store, config);
+  const chat = new ChatService(store, config, options.runner, options.clock);
   let windowStart = Date.now(),
     requests = 0;
   app.use('*', async (c, next) => {
     c.header('Cache-Control', 'no-store');
     c.header('X-Content-Type-Options', 'nosniff');
     const url = new URL(c.req.url);
-    if (!['localhost', '127.0.0.1', '[::1]'].includes(url.hostname))
+    if (
+      config.deployment === 'local' &&
+      !['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)
+    )
       throw new AppError(
         'LOCAL_ONLY',
         '현재 서버는 로컬 접근만 지원합니다.',
@@ -83,7 +91,8 @@ export function createApp(
   app.get('/health', (c) =>
     c.json({
       status: 'data_ready',
-      model_connected: false,
+      model_configured: chat.runner.readiness().ready,
+      model_status: chat.runner.readiness().code,
       agent_backend: config.agentBackend,
       sqlite: true,
     }),

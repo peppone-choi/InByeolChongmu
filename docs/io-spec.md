@@ -21,7 +21,7 @@
 
 ## 1.1. 채팅 수신 HTTP API (로컬 구현)
 
-`POST /api/chat`은 고객 DM을 받아 대화방에 저장합니다. 실제 모델 실행은 사용자 지시로 후속이며, 현재 텍스트 요청은 `503`과 `MODEL_NOT_CONNECTED`, `reply_draft:null`을 반환합니다. 자세한 경로·HTTP 오류·입력 제한은 [백엔드 사용법](backend.md)을 따릅니다.
+`POST /api/chat`은 고객 DM을 받아 대화방에 저장합니다. `AGENT_BACKEND=flue`와 OpenAI 모델·키를 설정하면 방 맥락을 읽고 도구를 호출한 뒤 검증된 분석을 `200`으로 반환합니다. 미설정은 `503`, 모델/검증 실패는 `503`, 실행 제한 시간 초과는 `504`입니다. 종료된 요청 ID의 성공·실패는 저장된 결과를 재사용합니다. 자세한 경로·HTTP 오류·입력 제한은 [백엔드 사용법](backend.md)을 따릅니다.
 
 - 요청: `schema_version`, `customer_handle`, `text` 필수. `attachments`는 `{type}` 배열로 생략 시 `[]`, `request_id`·`conversation_id`는 선택입니다. 추가 필드와 빈 텍스트/첨부는 거절합니다.
 - 서버 문맥: `seller_id`·자료 버전·처리 시각을 외부 본문에서 받지 않습니다. 현재는 로컬 가상 판매자만 지원하고 실제 운영 인증은 없습니다.
