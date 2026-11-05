@@ -1,0 +1,26 @@
+{
+  "schema_version": "0.1",
+  "synthetic": true,
+  "seller_id": "sample-seller-01",
+  "reference_time": "2026-11-05T10:00:00+09:00",
+  "notice": "가상 발송 계약 예시이며 실제 송장 접수·주문 갱신을 실행하지 않습니다.",
+  "case_id": "SHIP-001",
+  "request": {
+    "schema_version": "0.1",
+    "operation": "register_shipment",
+    "command_id": "ship-command-001",
+    "order_id": "O-0002",
+    "expected_version": 1,
+    "carrier": "가상택배",
+    "tracking_number": "SAMPLE-TRACK-0002",
+    "shipped_at": "2026-11-05T09:30:00+09:00"
+  },
+  "expected_response": {
+    "command_id": "ship-command-001",
+    "order_id": "O-0002",
+    "status": "shipped",
+    "version": 2,
+    "replayed": false
+  },
+  "stock_mutation_allowed": false
+}

@@ -49,6 +49,8 @@
 - `address_verification`: `not_checked | matched | no_match | ambiguous | failed | manually_confirmed`. API 조회 결과는 상세 동·호수·실제 수령지를 보장하지 않습니다.
 - “입금했어요”는 `customer_claimed_paid=true`일 뿐입니다. 입금 완료 상태를 생성하지 않습니다.
 
+현재 분석 예시는 품목별 SKU·상품 ID·수량·단가를 상품 스냅샷 및 DM 기대값과 대조한 뒤 금액을 검사합니다. 이미 저장된 과거 주문은 저장 당시 단가·할인·배송비로 산술만 검증하며 현재 정책을 다시 적용하지 않습니다. 과거 정책의 적합성까지 검증한 것은 아닙니다.
+
 주문 생성·수정은 분석과 별도인 `save_draft` 명령 제안입니다. 서버가 ID를 부여해 불완전한 후보는 `draft`, 필수값·정책 검증을 통과한 후보는 `pending_payment`로 저장합니다. 저장만으로 재고를 예약·차감하지 않습니다. 중복 고객·유사 주문을 표시하되 본문이 같다는 이유만으로 다른 실제 주문을 삭제하지 않습니다.
 
 ## 4. 주문 확정 명령과 응답
@@ -65,6 +67,7 @@
 - 근거·조회: `PRODUCT_UNRESOLVED`, `PRODUCT_AMBIGUOUS`, `SOURCE_MISSING`, `ORDER_NOT_FOUND`, `ORDER_AMBIGUOUS`.
 - 판단·가용성: `OUT_OF_STOCK`, `INSUFFICIENT_STOCK`, `SALE_CLOSED`, `SELLER_DECISION_REQUIRED`, `MANUAL_PAYMENT_CHECK`, `ADDRESS_UNVERIFIED`.
 - 실행 실패: `DEPENDENCY_UNAVAILABLE`, `OUTPUT_MISMATCH`, `STALE_VERSION`, `IDEMPOTENCY_CONFLICT`, `PAYMENT_MISMATCH`, `APPROVAL_REQUIRED`.
+- 발송 등록: `FORBIDDEN`, `SHIPMENT_FIELDS_REQUIRED`, `INVALID_SHIPMENT_TIME`, `INVALID_ORDER_STATE`, `SHIPMENT_ALREADY_RECORDED`. 주문 없음은 `ORDER_NOT_FOUND`, 버전·키 충돌은 위 공통 코드를 사용합니다.
 
 확인 코드는 사용자 보완/판단이 필요하고 자동 반복하지 않습니다. 장애 코드는 `retryable`을 구분하며 구체적 재시도 횟수·대기값은 구현 시 정합니다. JSON 실패·초안 검증 실패 때 검증되지 않은 초안을 정상 결과로 노출하지 않습니다.
 
@@ -73,3 +76,21 @@
 내부 공통 행은 `order_id, recipient_name, phone, postal_code, address, item_summary, total_krw, shipping_memo`입니다. 한 주문당 한 행에 상품을 합치며, 실제 택배사 어댑터가 대상 열·자료형으로 변환합니다. 이 목록을 실제 택배 업로드 양식이라고 주장하지 않습니다.
 
 결과는 `export_id`, `template_version`, `included_order_ids`, `excluded[{order_id, reason}]`, 파일 정보입니다. 전화·우편번호는 문자열로 유지하고 고객 입력의 수식 실행을 막습니다. 파일 생성은 주문 발송이나 송장 발급을 뜻하지 않습니다. 실제 양식과 파일 형식 검증은 미완료입니다.
+
+## 7. 수동 발송·송장 등록 및 정정 계약
+
+앱은 아직 미구현입니다. 첫 버전은 판매자가 기존 택배 프로그램에서 실제 발송을 확인한 뒤 직접 기록하는 방식으로 설계합니다. 택배사 API 발급·자동 동기화는 추가하지 않습니다. [SHIP-001 가상 명령과 기대 응답](samples/shipment-example.json)은 문서 계약 예시이며 주문 파일을 변경하지 않습니다.
+
+### 최초 등록: `register_shipment`
+
+입력은 `schema_version`, `operation`, `command_id`, `order_id`, `expected_version`, `carrier`, `tracking_number`, `shipped_at`입니다. 택배사·송장번호는 공백 제거 후 비어 있지 않은 문자열로 받고 송장 앞자리 0을 보존합니다. 발송 시각은 시간대 포함 시각이며 `confirmed_at ≤ shipped_at ≤ 서버 현재 시각`이어야 합니다. 송장 양식은 택배사별로 확인하며, 번호의 실제 존재나 배송 상태를 확인했다고 표시하지 않습니다.
+
+서버는 인증한 판매자의 주문인지 확인합니다. 최초 등록의 허용 상태는 `confirmed`이며 성공하면 송장 정보·발송일·감사 기록과 버전 증가를 원자적으로 저장해 `shipped`로 바꿉니다. `draft/pending_payment/cancelled`는 `INVALID_ORDER_STATE`, 이미 `shipped`인 주문의 새 등록 명령은 `SHIPMENT_ALREADY_RECORDED`로 거절합니다.
+
+성공 응답은 `{command_id, order_id, status:"shipped", version, replayed:false}`이며 버전은 기존 값 + 1입니다. 거절 응답은 `{command_id, status:"rejected", code, message, retryable}`입니다. 검증 실패·버전 충돌·저장 실패 시 일부 필드나 감사 기록만 반영하지 않습니다. 등록은 재고·금액·수령인·입금 상태를 변경하지 않습니다.
+
+### 재시도·정정
+
+승인·등록·정정 명령의 키는 판매자 범위에서 공유합니다. 권한 확인 후 동일 키의 저장 결과를 먼저 확인합니다. 동일한 정규화 요청은 저장된 응답에 `replayed:true`만 바꿔 반환하고, 현재 버전이 달라도 다시 저장하지 않습니다. 같은 키의 다른 operation·주문·필드·버전은 `IDEMPOTENCY_CONFLICT`로 거절합니다. 저장 결과가 없는 새 명령만 버전·상태를 검사합니다. 문자열 공백과 시각 표현은 정규화한 뒤 요청 지문에 포함합니다.
+
+오입력은 별도 `update_shipment` 명령으로 정정합니다. 최초 등록과 같은 필드에 비어 있지 않은 `correction_reason`을 추가하고, `shipped` 상태·최신 버전만 허용합니다. 시각·필수값 검증과 응답 형식은 최초 등록과 같습니다. 성공 시 `shipped`를 유지하고 버전만 1 증가시키며 변경 전후 값·사유·서버 승인자·수정 시각을 제한된 감사 기록에 남깁니다. 재시도 규칙도 동일하고 재고는 다시 차감하지 않습니다. 취소·환불·발송 취소 명령으로 사용하지 않습니다.
