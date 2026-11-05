@@ -143,6 +143,7 @@ export class ChatService {
         {
           messages: this.config.historyMessages,
           characters: this.config.historyCharacters,
+          timeoutMs: this.config.agentTimeoutMs,
         },
         this.clock(),
       );

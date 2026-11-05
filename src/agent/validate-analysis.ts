@@ -118,48 +118,93 @@ export function validateAnalysis(
         )
           mismatch();
       }
-    if (draft.amounts) {
-      const normalize = (
-        items: Array<{ sku: string | null; quantity: number | null }>,
-      ) => {
-        const quantities = new Map<string, number>();
-        for (const item of items) {
-          if (!item.sku || !item.quantity) mismatch();
-          quantities.set(
-            item.sku,
-            (quantities.get(item.sku) ?? 0) + item.quantity,
-          );
-        }
-        return JSON.stringify(
-          [...quantities].sort(([a], [b]) => a.localeCompare(b)),
-        );
-      };
-      const quote = traces
-        .filter((t) => t.name === 'quote_order')
-        .map((t) => object(t.result))
-        .find(
-          (value) =>
-            normalize(
-              z
-                .array(z.object({ sku: z.string(), quantity: z.number() }))
-                .parse(value.items),
-            ) === normalize(draft.items),
-        );
+    // A model must not turn absent customer data into a complete payable order.
+    const normalizeText = (text: string) =>
+      text.normalize('NFKC').replace(/\s+/gu, '');
+    const customerText = run.input.history
+      .filter((message) => message.role === 'customer')
+      .map((message) => normalizeText(message.text));
+    for (const value of [
+      ...Object.values(draft.recipient),
+      draft.depositor_name,
+    ])
       if (
-        !quote ||
-        JSON.stringify(amountSchema.parse(quote.amounts)) !==
-          JSON.stringify(draft.amounts)
+        value !== null &&
+        (!normalizeText(value) ||
+          !customerText.some((text) => text.includes(normalizeText(value))))
       )
         mismatch();
-      for (const value of z
+    if (
+      !['needs_info', 'human_review', 'awaiting_payment'].includes(
+        analysis.status,
+      )
+    )
+      mismatch();
+    const requireReview = (code: string) => {
+      if (
+        analysis.status !== 'human_review' ||
+        !analysis.review_items.some((item) => item.code === code)
+      )
+        mismatch();
+    };
+    for (const item of draft.items) {
+      if (!item.sku) continue;
+      const product = products.find((product) =>
+        product.variants.some((variant) => variant.sku === item.sku),
+      )!;
+      const variant = product.variants.find(
+        (variant) => variant.sku === item.sku,
+      )!;
+      if (variant.stock_available === 0) requireReview('OUT_OF_STOCK');
+      if (Date.parse(product.closes_at) < Date.parse(run.input.reference_time))
+        requireReview('SALE_CLOSED');
+    }
+    const resolved = draft.items.flatMap((item) =>
+      item.sku && item.quantity
+        ? [{ sku: item.sku, quantity: item.quantity }]
+        : [],
+    );
+    const normalizeItems = (
+      items: Array<{ sku: string; quantity: number }>,
+    ) => {
+      const quantities = new Map<string, number>();
+      for (const item of items)
+        quantities.set(
+          item.sku,
+          (quantities.get(item.sku) ?? 0) + item.quantity,
+        );
+      return JSON.stringify(
+        [...quantities].sort(([a], [b]) => a.localeCompare(b)),
+      );
+    };
+    // Availability warnings matter even when a recipient or total is still missing.
+    const quote = resolved.length
+      ? traces
+          .filter((trace) => trace.name === 'quote_order')
+          .map((trace) => object(trace.result))
+          .find(
+            (value) =>
+              normalizeItems(
+                z
+                  .array(z.object({ sku: z.string(), quantity: z.number() }))
+                  .parse(value.items),
+              ) === normalizeItems(resolved),
+          )
+      : undefined;
+    if (resolved.length && !quote) mismatch();
+    if (
+      draft.amounts &&
+      (!quote ||
+        resolved.length !== draft.items.length ||
+        JSON.stringify(amountSchema.parse(quote.amounts)) !==
+          JSON.stringify(draft.amounts))
+    )
+      mismatch();
+    if (quote)
+      for (const review of z
         .array(z.object({ code: z.string() }))
         .parse(quote.review_items))
-        if (
-          !analysis.review_items.some((review) => review.code === value.code) ||
-          analysis.status !== 'human_review'
-        )
-          mismatch();
-    }
+        requireReview(review.code);
     if (
       !analysis.review_items.some((r) => r.code === 'MANUAL_PAYMENT_CHECK') ||
       !analysis.review_items.some((r) => r.code === 'ADDRESS_UNVERIFIED')
@@ -172,6 +217,7 @@ export function validateAnalysis(
         analysis.invalid_fields.length ||
         !draft.recipient.name ||
         !draft.recipient.phone_raw ||
+        !/^010\d{8}$/.test(draft.recipient.phone_raw.replace(/[- ()]/g, '')) ||
         !draft.recipient.address_raw ||
         !draft.depositor_name ||
         draft.items.length === 0

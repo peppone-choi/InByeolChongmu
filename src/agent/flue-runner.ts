@@ -161,7 +161,20 @@ export class FlueRunner implements AgentRunner {
         '모델 설정을 확인하세요.',
         503,
       );
+    const deadline = run.input.expires_at
+      ? Date.parse(run.input.expires_at)
+      : Date.parse(run.input.reference_time) + this.config.agentTimeoutMs;
+    const checkDeadline = () => {
+      if (!(deadline > Date.now()))
+        throw new AppError(
+          'AGENT_TIMEOUT',
+          '분석 제한 시간을 초과했습니다.',
+          504,
+        );
+    };
+    checkDeadline();
     await this.ensureStarted();
+    checkDeadline();
     const handle = init(this.agent, { id: run.id });
     const controller = new AbortController();
     const timer = setTimeout(
@@ -169,7 +182,7 @@ export class FlueRunner implements AgentRunner {
         controller.abort(
           new AppError('AGENT_TIMEOUT', '분석 제한 시간을 초과했습니다.', 504),
         ),
-      this.config.agentTimeoutMs,
+      deadline - Date.now(),
     );
     try {
       const receipt = await handle.dispatch({

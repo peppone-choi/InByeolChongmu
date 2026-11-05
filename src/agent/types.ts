@@ -7,6 +7,7 @@ export type RunInput = {
   customer_handle: string;
   context_label: string;
   reference_time: string;
+  expires_at?: string;
   snapshots: { products: string; policies: string; orders: string };
   history: Array<Pick<Message, 'role' | 'text' | 'request_id'>>;
   context_truncated: boolean;

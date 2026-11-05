@@ -292,3 +292,84 @@ test('container requires a strong token; provider secrets stay out of serialized
   assert.equal(providerEnvironment(configured).OPENAI_API_KEY, 'fake-secret');
   assert.ok(!JSON.stringify(configured).includes('fake-secret'));
 });
+
+function provenOrder() {
+  const { store, run } = fixture();
+  const tools = new Tools(store, seller, root, () => now, '@sample.hana');
+  for (const [name, args] of [
+    ['search_products', { query: '니트' }],
+    ['get_policies', {}],
+    [
+      'quote_order',
+      {
+        items: [
+          { sku: 'K-BE', quantity: 1 },
+          { sku: 'K-CR', quantity: 1 },
+        ],
+      },
+    ],
+  ] as const)
+    store.traceTool(run.id, name, name, true, tools.call(name, args), 16);
+  const analysis = JSON.parse(
+    readFileSync('docs/samples/analysis-example.json', 'utf8'),
+  ) as Analysis;
+  analysis.request_id = 'test';
+  return { store, run, tools, analysis };
+}
+test('adversarial: invented recipient fields cannot become a payable order even with valid quote evidence', () => {
+  const { store, run, analysis } = provenOrder();
+  try {
+    run.input.history.push({
+      role: 'assistant',
+      request_id: 'untrusted-draft',
+      text: '지어낸수령인 010-9999-9999 원문에 없는 다른 주소 99999 가짜입금자',
+    });
+    for (const [field, value] of [
+      ['name', '지어낸수령인'],
+      ['phone_raw', '010-9999-9999'],
+      ['address_raw', '원문에 없는 다른 주소'],
+      ['postal_code', '99999'],
+    ] as const) {
+      const fake = structuredClone(analysis);
+      fake.order_draft!.recipient[field] = value;
+      assert.throws(() => validateAnalysis(store, run, fake), field);
+    }
+    const fake = structuredClone(analysis);
+    fake.order_draft!.depositor_name = '가짜입금자';
+    assert.throws(() => validateAnalysis(store, run, fake), 'depositor');
+  } finally {
+    store.close();
+  }
+});
+test('adversarial: null amounts cannot bypass stock warnings or omit the matching quote', () => {
+  const { store, run, tools, analysis } = provenOrder();
+  try {
+    const unsafe = structuredClone(analysis);
+    unsafe.order_draft!.items = [
+      { product_id: 'P001', sku: 'K-BK', quantity: 1, unit_price_krw: 33000 },
+    ];
+    unsafe.order_draft!.amounts = null;
+    unsafe.matched_skus = ['K-BK'];
+    unsafe.status = 'needs_info';
+    unsafe.order_draft!.recipient.phone_raw = null;
+    unsafe.missing_fields = ['recipient.phone_raw'];
+    assert.throws(() => validateAnalysis(store, run, unsafe), 'missing quote');
+    store.traceTool(
+      run.id,
+      'black-quote',
+      'quote_order',
+      true,
+      tools.call('quote_order', { items: [{ sku: 'K-BK', quantity: 1 }] }),
+      16,
+    );
+    assert.throws(
+      () => validateAnalysis(store, run, unsafe),
+      'hidden stock warning',
+    );
+    unsafe.status = 'human_review';
+    unsafe.review_items.push({ code: 'OUT_OF_STOCK', message: '품절' });
+    assert.equal(validateAnalysis(store, run, unsafe).status, 'human_review');
+  } finally {
+    store.close();
+  }
+});

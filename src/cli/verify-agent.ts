@@ -67,6 +67,8 @@ try {
       http_status: response.status,
       status: result.analysis?.status,
       classification: result.analysis?.classification,
+      missing_fields: result.analysis?.missing_fields,
+      invalid_fields: result.analysis?.invalid_fields,
       review_codes: result.analysis?.review_items?.map(
         (r: { code: string }) => r.code,
       ),
@@ -85,6 +87,23 @@ try {
     'Independent sample price check failed.',
   );
   assert.equal(result.analysis.state_mutation_allowed, false);
+  assert.equal(
+    result.analysis.status,
+    'awaiting_payment',
+    'A complete virtual order must not be reported as missing information.',
+  );
+  assert.deepEqual(result.analysis.missing_fields, []);
+  assert.deepEqual(result.analysis.invalid_fields, []);
+  assert.equal(result.analysis.order_draft.recipient.name, '샘플하나');
+  assert.equal(
+    result.analysis.order_draft.recipient.phone_raw,
+    '010-0000-1001',
+  );
+  assert.equal(
+    result.analysis.order_draft.recipient.address_raw,
+    '가상시 예시구 테스트로 101 샘플동 202호',
+  );
+  assert.equal(result.analysis.order_draft.depositor_name, '샘플하나');
   assert.equal(result.analysis.order_draft.address_verification, 'not_checked');
   assert.ok(
     result.execution.tool_calls.some(

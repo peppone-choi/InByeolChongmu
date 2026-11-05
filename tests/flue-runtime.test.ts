@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import { z } from 'zod';
 import { test } from 'node:test';
-import { readFileSync } from 'node:fs';
+import { readFileSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   fauxProvider,
   fauxAssistantMessage,
@@ -247,5 +249,62 @@ test('Flue timeout aborts the pending model and releases the room', async () => 
   } finally {
     await runner.stop();
     store.close();
+  }
+});
+
+test('adversarial: SQLite resume cannot reset an expired run deadline', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'inbyeol-expiry-'));
+  const path = join(directory, 'app.sqlite');
+  let store = new Store(path);
+  store.seedSamples(root, seller);
+  const room = store.createConversation(seller, '@sample.hana', '');
+  store.receive(seller, {
+    requestId: 'expired',
+    conversationId: room.id,
+    handle: '@sample.hana',
+    text: '니트 문의',
+    attachments: [],
+  });
+  const limits = { messages: 40, characters: 40000, timeoutMs: -1 };
+  const saved = store.beginRun(seller, 'expired', limits, new Date());
+  store.close();
+  store = new Store(path);
+  assert.equal(
+    store.runById(saved.id).input.expires_at,
+    saved.input.expires_at,
+  );
+  const config = readConfig(root, {
+    NODE_ENV: 'test',
+    APP_DEPLOYMENT: 'local',
+    DATABASE_PATH: ':memory:',
+    FLUE_DATABASE_PATH: ':memory:',
+    AGENT_BACKEND: 'flue',
+    AGENT_MODEL: 'faux/test',
+    LOCAL_API_TOKEN: '',
+    OPENAI_API_KEY: '',
+    TYPESAFE_API_KEY: '',
+  });
+  const faux = fauxProvider({ provider: 'faux', models: [{ id: 'test' }] });
+  faux.setResponses([fauxAssistantMessage('late output')]);
+  const runner = new FlueRunner(store, config, { providers: [faux.provider] }),
+    app = createApp(store, config, { runner });
+  try {
+    const response = await app.request(
+      '/api/chat',
+      post({
+        schema_version: '0.1',
+        request_id: 'expired',
+        conversation_id: room.id,
+        customer_handle: '@sample.hana',
+        text: '니트 문의',
+      }),
+    );
+    assert.equal(response.status, 504);
+    assert.equal(faux.state.callCount, 0);
+    assert.equal(store.roomRunning(seller, room.id), false);
+  } finally {
+    await runner.stop();
+    store.close();
+    rmSync(directory, { recursive: true, force: true });
   }
 });

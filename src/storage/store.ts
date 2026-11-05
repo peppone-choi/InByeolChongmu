@@ -392,7 +392,7 @@ export class Store {
   beginRun(
     sellerId: string,
     requestId: string,
-    limits: { messages: number; characters: number },
+    limits: { messages: number; characters: number; timeoutMs?: number },
     now: Date,
   ): AgentRun {
     return this.transaction(() => {
@@ -457,6 +457,9 @@ export class Store {
         customer_handle: room.customer_handle,
         context_label: room.context_label,
         reference_time: now.toISOString(),
+        expires_at: new Date(
+          Date.now() + (limits.timeoutMs ?? 60000),
+        ).toISOString(),
         snapshots: {
           products: this.source(sellerId, 'product').snapshot_id,
           policies: this.source(sellerId, 'policy').snapshot_id,
