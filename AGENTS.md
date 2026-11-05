@@ -52,6 +52,8 @@ DM 샘플의 `conversation`을 원본으로 유지하고 분석용 `input.text`�
 
 ## AI 기능 구현 시 지침
 
+작업 우선순위는 `docs/implementation-plan.md`의 제품 흐름을 따릅니다. 읽기 에이전트·자료 관리 화면을 주문 MVP 완성으로 보고하지 마세요. 분석 JSON의 `order_draft`는 저장된 주문이 아니며 후보 저장·판매자 확인/확정·발송/정정·택배 내보내기를 구분하세요. 추가 자료 관리 요구(R-14~16) 중 추가·삭제/독립 초기화/웹 엑셀 업로드/현재 데이터 전체 내보내기는 승인됐지만 미구현임을 유지합니다.
+
 키는 `.env.local`의 `OPENAI_API_KEY`·`TYPESAFE_API_KEY`로 받으며 값은 출력하거나 커밋하지 마세요. 기본 `AGENT_BACKEND=disabled`로 키 없이 자료 도구를 사용할 수 있습니다. 실제 호출은 `flue`와 모델·키를 설정해야 하며 `npm run verify:agent`는 명시적으로 실행하는 유료 가상 자료 연결 검사입니다. 자동 테스트에서 로컬 키를 사용하지 마세요.
 
 Flue·Jev·Hermes·OpenAI Agents API·AI Gateway가 사용자가 지정한 우선 활용 기술군입니다. `docs/implementation-plan.md`의 역할·연결 검증 계획을 따르고, 도구를 쓸 수 있는 실행기를 단순 모델 호출 코드로 대체한다고 임의로 결정하지 마세요. 실행기 중복·게이트웨이 호환성·앱 자체의 자료 접근 권한은 실제로 검증하고, 연결되지 않은 도구를 사용 가능으로 표시하지 마세요.

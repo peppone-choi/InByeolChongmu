@@ -1,6 +1,6 @@
 # 아키텍처와 외부 연동 설계
 
-상태: 로컬 백엔드·자료 도구 구현. Hono·TypeScript·파일 SQLite를 채택했으며 Flue 도구/에이전트 정의와 MCP stdio를 연결했습니다. 실제 모델 실행·외부 연동·배포는 없습니다. 구현 계약은 [백엔드 사용법](backend.md)을 따릅니다.
+상태: Hono·TypeScript·파일 SQLite, Flue/OpenAI 실행·TypeSafe 분류·자료 도구·React 검토 화면·상품/정책 수정과 Docker 단일 서버 실행을 구현했습니다. 주문 후보 저장·판매자 승인·발송/정정·택배 내보내기·실제 고객 운영 배포는 미구현입니다. 구현 계약은 [백엔드 사용법](backend.md)을 따릅니다.
 
 ## 처리 흐름
 
