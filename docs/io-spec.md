@@ -1,0 +1,75 @@
+# 입력·출력 명세
+
+상태: 계약 초안 `0.1` · 구현·네트워크 API 없음. JSON 키는 코드용, 설명과 화면 문구는 한글입니다.
+
+## 1. 분석 입력
+
+정확한 예시는 [DM 사례](samples/dm-cases.json)의 `cases[].input`을 사용합니다.
+
+- `schema_version`: 문자열 `0.1`.
+- `request_id`: 판매자 범위의 요청 식별자. 분석 재시도 식별에 사용하며 주문 확정 키와 다릅니다.
+- `seller_id`: 단일 판매자 식별자. 운영에서는 클라이언트 값을 신뢰하지 않고 인증 문맥과 대조합니다.
+- `reference_time`: 시간대가 있는 기준 시각. 샘플은 `2026-11-05T10:00:00+09:00`로 고정합니다. 운영의 마감 판정 시각은 서버가 제공합니다.
+- `customer_handle`: 비어 있지 않은 고객 아이디, 샘플에서는 `@sample.` 접두사를 사용합니다.
+- `text`: DM 원문. 공백만 있는 본문은 빈 본문입니다.
+- `attachments`: 배열, 없으면 `[]`. 사진만 있으면 지원 불가이며 이미지 내용을 분석하지 않습니다.
+- `snapshots`: `products`·`policies`·`orders` 자료 버전. 샘플 로더는 fixture를 읽고, 운영에서는 허용된 자료만 조회합니다.
+
+일괄 입력은 `{schema_version, batch_id, entries: [분석 입력, ...]}` 형식 제안입니다. 요청·고객별 결과와 실패를 개별 반환하며 대화를 임의로 이어 붙이지 않습니다. 건수·본문 길이 제한은 비용·지연 측정 후 정합니다.
+
+## 2. 분석 출력
+
+전체 예시: [DM-002 기대 출력](samples/analysis-example.json). 아래 키를 항상 제공하고 값이 없으면 `null` 또는 빈 배열을 사용합니다.
+
+- `schema_version`, `request_id`: 계약 버전과 입력 요청 식별자.
+- `classification`: `product_inquiry | order_request | payment_claim | order_lookup | claim | unrelated`. 입력 오류·지원 불가 때만 `invalid_input | unsupported`를 사용합니다. 분류 전 실행 실패는 `null`입니다.
+- `status`: `invalid_input | unsupported | human_review | needs_info | awaiting_payment | ready_for_review | ignored | failed`. 영속 주문 상태와 별개입니다.
+- `priority`: `normal | high`. 클레임은 `high`.
+- `reply_draft`: 문자열 또는 `null`. 전송됐다는 의미가 아닙니다.
+- `order_candidates`, `product_candidates`: ID 배열. 판매자 전용 조회 정보입니다.
+- `matched_skus`: 특정된 SKU 배열. 주문 후보가 없는 상품 문의에서도 조회된 옵션을 나타냅니다. 상품이 모호하면 빈 배열입니다.
+- `order_draft`: 아래 주문 후보 객체 또는 `null`. 분석만으로 저장·확정하지 않습니다.
+- `missing_fields`, `invalid_fields`: 필드 경로 문자열 배열.
+- `review_items`: `{code, message}` 배열. 미확인·차단 사유를 명시하고 실행 실패에는 `retryable`도 제공합니다.
+- `evidence`: `{source_type, source_id, snapshot_id, field_paths}` 배열. 유형은 `product | policy | order`, 필드 경로는 source ID 내부의 사람이 읽는 위치 표기입니다. 실행 가능한 JSONPath로 취급하지 않습니다.
+- `state_mutation_allowed`: 분석에서는 항상 `false`.
+
+모델이 반환한 허용 플래그로 쓰기 권한을 결정하지 않습니다. 분석 경로 자체에 주문·재고 변경 기능을 연결하지 않습니다.
+
+상태 우선순위: 입력 오류 → 지원 불가 → 처리 실패 → 판매자 판단 필요 → 정보 보완 → 입금 확인 대기 → 초안 검토 가능. 판매 무관은 `ignored`입니다. 수동 입금·주소 확인 안내만 있는 완전한 주문은 `awaiting_payment`이며 다른 차단 사유를 숨기지 않습니다.
+
+## 3. 주문 후보와 값 규칙
+
+`order_draft`는 `customer_handle`, `recipient{name, phone_raw, address_raw, postal_code}`, `depositor_name`, `customer_claimed_paid`, `items[]`, `amounts`, `address_verification`으로 구성합니다.
+
+- `items[]`: `{product_id, sku, quantity, unit_price_krw}`. 수량은 양의 정수, 가격은 상품표에서 읽은 정수입니다. 미특정 상품·수량은 `null`로 보존하며 추측하지 않습니다.
+- 필수값: 상품·옵션·수량·이름·연락처·주소·입금자명. 후보 단계에서는 누락값을 `null`로 두고 `missing_fields`에 표시합니다. 우편번호 필수 여부는 택배 양식으로 정합니다.
+- `amounts`: `{subtotal_krw, discount_krw, shipping_fee_krw, total_krw}`. 금액은 음수가 아닌 원 단위 정수. 상품·수량·가격·정책 중 계산 근거가 부족하거나 잘못되면 객체 전체를 `null`로 둡니다.
+- 연락처는 원문을 보존하고 숫자 정규화 후 국내 휴대폰 형식 등 허용 규칙을 검사합니다. 샘플 정상 번호는 `010` 뒤 8자리이며 번호 존재·소유자 확인을 뜻하지 않습니다.
+- `address_verification`: `not_checked | matched | no_match | ambiguous | failed | manually_confirmed`. API 조회 결과는 상세 동·호수·실제 수령지를 보장하지 않습니다.
+- “입금했어요”는 `customer_claimed_paid=true`일 뿐입니다. 입금 완료 상태를 생성하지 않습니다.
+
+주문 생성·수정은 분석과 별도인 `save_draft` 명령 제안입니다. 서버가 ID를 부여해 불완전한 후보는 `draft`, 필수값·정책 검증을 통과한 후보는 `pending_payment`로 저장합니다. 저장만으로 재고를 예약·차감하지 않습니다. 중복 고객·유사 주문을 표시하되 본문이 같다는 이유만으로 다른 실제 주문을 삭제하지 않습니다.
+
+## 4. 주문 확정 명령과 응답
+
+명령 필수값: `command_id`(멱등 키), `order_id`, `expected_version`, `reviewed_snapshots`, `payment_checked=true`, `checked_amount_krw`, `checked_depositor_name`, `address_acknowledged=true`. 승인자·확인 시각은 신뢰 가능한 서버 문맥에서 기록합니다. 주소 검색 API 성공을 필수 조건으로 강제하지 않지만 미검사 상태와 판매자 수령지 확인은 기록합니다.
+
+성공 응답: `{command_id, order_id, status:"confirmed", version, replayed:false}`. 동일 명령 재호출은 기존 결과와 `replayed:true`를 반환합니다. 별도 키로 이미 확정한 주문을 요청하면 기존 상태를 반환하고 다시 차감하지 않습니다.
+
+실패 응답: `{command_id, status:"rejected", code, message, retryable}`. 금액·입금자명·확인 플래그·최신 버전·정책·재고를 재검사하고, 실패 시 일부 품목만 차감하지 않습니다. 저장소 트랜잭션 또는 동등한 원자적 보장이 필요합니다.
+
+## 5. 오류·확인 코드
+
+- 입력·추출: `HANDLE_REQUIRED`, `TEXT_REQUIRED`, `INVALID_PHONE`, `INVALID_QUANTITY`, `INVALID_JSON`.
+- 근거·조회: `PRODUCT_UNRESOLVED`, `PRODUCT_AMBIGUOUS`, `SOURCE_MISSING`, `ORDER_NOT_FOUND`, `ORDER_AMBIGUOUS`.
+- 판단·가용성: `OUT_OF_STOCK`, `INSUFFICIENT_STOCK`, `SALE_CLOSED`, `SELLER_DECISION_REQUIRED`, `MANUAL_PAYMENT_CHECK`, `ADDRESS_UNVERIFIED`.
+- 실행 실패: `DEPENDENCY_UNAVAILABLE`, `OUTPUT_MISMATCH`, `STALE_VERSION`, `IDEMPOTENCY_CONFLICT`, `PAYMENT_MISMATCH`, `APPROVAL_REQUIRED`.
+
+확인 코드는 사용자 보완/판단이 필요하고 자동 반복하지 않습니다. 장애 코드는 `retryable`을 구분하며 구체적 재시도 횟수·대기값은 구현 시 정합니다. JSON 실패·초안 검증 실패 때 검증되지 않은 초안을 정상 결과로 노출하지 않습니다.
+
+## 6. 내보내기 계약
+
+내부 공통 행은 `order_id, recipient_name, phone, postal_code, address, item_summary, total_krw, shipping_memo`입니다. 한 주문당 한 행에 상품을 합치며, 실제 택배사 어댑터가 대상 열·자료형으로 변환합니다. 이 목록을 실제 택배 업로드 양식이라고 주장하지 않습니다.
+
+결과는 `export_id`, `template_version`, `included_order_ids`, `excluded[{order_id, reason}]`, 파일 정보입니다. 전화·우편번호는 문자열로 유지하고 고객 입력의 수식 실행을 막습니다. 파일 생성은 주문 발송이나 송장 발급을 뜻하지 않습니다. 실제 양식과 파일 형식 검증은 미완료입니다.
