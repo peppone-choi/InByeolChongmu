@@ -27,7 +27,17 @@ function fixture() {
   const calls: ChatRequest[] = [];
   let handler: (input: ChatRequest) => Promise<ChatResult> = async (input) =>
     result(input);
-  const transport: Omit<Api, 'updateProduct' | 'updatePolicy'> = {
+  const transport: Pick<
+    Api,
+    | 'session'
+    | 'login'
+    | 'health'
+    | 'resources'
+    | 'rooms'
+    | 'room'
+    | 'create'
+    | 'chat'
+  > = {
     session: async () => ({
       authenticated: true,
       authentication_required: false,

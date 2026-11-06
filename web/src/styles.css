@@ -2107,3 +2107,235 @@ h3 {
     font-size: 16px;
   }
 }
+
+/* Order and data tools share the quiet resource editor styling. */
+.data-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 12px;
+  margin: 18px 0;
+}
+.data-actions label,
+.data-management label,
+.order-editor label {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  font-size: 13px;
+}
+.data-actions input,
+.data-actions select,
+.data-management input,
+.order-editor input,
+.order-editor select {
+  min-width: 0;
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--color-rule);
+  border-radius: 7px;
+  background: var(--color-surface);
+  color: inherit;
+  font: inherit;
+}
+.data-actions select,
+.resource-heading + .data-actions select {
+  min-height: 40px;
+}
+.danger {
+  color: var(--color-danger);
+}
+.inline-confirm {
+  border: 1px solid var(--color-danger);
+  border-radius: 10px;
+  padding: 20px;
+  margin: 20px 0;
+  background: var(--color-danger-bg);
+}
+.inline-confirm .button {
+  margin: 8px 8px 0 0;
+}
+.reset-options {
+  border-top: 1px solid var(--color-rule);
+  margin-top: 24px;
+  padding-top: 20px;
+}
+.reset-options .button {
+  margin: 8px 8px 0 0;
+}
+.import-preview {
+  border: 1px solid var(--color-rule);
+  padding: 18px;
+  margin-top: 20px;
+  border-radius: 10px;
+  overflow-wrap: anywhere;
+}
+.import-preview ul {
+  padding-left: 20px;
+  max-height: 280px;
+  overflow: auto;
+}
+.file-label {
+  padding: 16px;
+  border: 1px dashed var(--color-rule);
+  border-radius: 8px;
+}
+.order-layout {
+  display: grid;
+  grid-template-columns: minmax(180px, 250px) minmax(0, 1fr);
+  gap: 22px;
+  align-items: start;
+  margin-top: 24px;
+}
+.order-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 70vh;
+  overflow: auto;
+}
+.order-row {
+  display: flex;
+  flex-direction: column;
+  align-items: start;
+  gap: 6px;
+  padding: 14px;
+  border: 1px solid var(--color-rule);
+  border-radius: 8px;
+  background: var(--color-surface);
+  text-align: left;
+  color: inherit;
+}
+.order-row.selected {
+  border-color: var(--color-accent);
+  background: var(--color-accent-soft);
+}
+.order-row span,
+.order-row small {
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.order-row small {
+  color: var(--color-muted);
+}
+.order-editor {
+  margin: 0;
+  min-width: 0;
+}
+.order-editor h2 {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.order-editor fieldset {
+  border: 0;
+  margin: 14px 0;
+  padding: 0;
+  min-width: 0;
+}
+.form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+.order-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 75px 32px;
+  gap: 10px;
+  align-items: end;
+  margin: 14px 0;
+}
+.order-totals {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 24px 0 16px;
+  padding: 16px 0;
+  border-block: 1px solid var(--color-rule);
+  font-size: 13px;
+}
+.order-totals strong {
+  margin-left: auto;
+}
+.order-issues {
+  color: var(--color-danger);
+  padding-left: 18px;
+  line-height: 1.8;
+}
+.payment-check {
+  padding-top: 12px;
+  border-top: 1px solid var(--color-rule);
+}
+.payment-check p {
+  font-size: 13px;
+  line-height: 1.7;
+}
+.payment-check fieldset {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.order-editor label.check-line {
+  flex-direction: row;
+  align-items: start;
+  line-height: 1.7;
+}
+.check-line input {
+  width: 17px;
+  flex: 0 0 17px;
+  margin-top: 3px;
+}
+.order-editor .button {
+  white-space: normal;
+}
+@media (max-width: 1100px) {
+  .order-layout {
+    grid-template-columns: 1fr;
+  }
+  .order-list {
+    flex-direction: row;
+    max-height: 220px;
+  }
+  .order-row {
+    min-width: 180px;
+    max-width: 230px;
+  }
+}
+@media (max-width: 600px) {
+  .form-grid {
+    grid-template-columns: 1fr;
+  }
+  .order-item {
+    grid-template-columns: minmax(0, 1fr) 62px 26px;
+    gap: 6px;
+  }
+  .data-actions {
+    align-items: stretch;
+  }
+  .data-actions label {
+    width: 100%;
+  }
+  .order-editor > header {
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+  .order-totals strong {
+    width: 100%;
+    margin-left: 0;
+  }
+}
+.orders-page.settings-page {
+  max-width: 1280px;
+  padding-inline: 32px;
+}
+@media (max-width: 600px) {
+  .orders-page.settings-page {
+    padding-inline: 16px;
+  }
+  .order-editor {
+    padding: 16px;
+  }
+  .order-list {
+    max-width: 100%;
+  }
+}

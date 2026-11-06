@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { relative, resolve, isAbsolute } from 'node:path';
 import { z } from 'zod';
 import { AppError } from '../domain/errors.js';
-import { Store } from '../storage/store.js';
+import type { Store } from '../storage/store.js';
 
 const query = z.string().trim().min(1).max(200);
 const itemsSchema = z
@@ -253,7 +253,7 @@ export class Tools {
               : 'INSUFFICIENT_STOCK',
           sku,
         });
-      if (Date.parse(match.p.closes_at) < this.clock().getTime())
+      if (Date.parse(match.p.closes_at) <= this.clock().getTime())
         review.push({ code: 'SALE_CLOSED', sku });
       return {
         product_id: match.p.product_id,

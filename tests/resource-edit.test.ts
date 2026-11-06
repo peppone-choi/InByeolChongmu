@@ -132,7 +132,7 @@ test('stale edits and invalid changes never overwrite current records or version
     assert.equal(store.products(seller)[0]!.name, '먼저 저장');
     const snapshot = store.source(seller, 'product').snapshot_id,
       invalid = structuredClone(p);
-    invalid.variants[0]!.sku = 'renamed';
+    invalid.product_id = 'renamed';
     assert.equal(
       (
         await app.request(
@@ -142,7 +142,7 @@ test('stale edits and invalid changes never overwrite current records or version
       ).status,
       422,
     );
-    invalid.variants[0]!.sku = p.variants[0]!.sku;
+    invalid.product_id = p.product_id;
     invalid.variants[0]!.stock_available = -1;
     assert.equal(
       (

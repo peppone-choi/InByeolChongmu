@@ -1,5 +1,4 @@
 import {
-  StrictMode,
   useEffect,
   useRef,
   useState,
@@ -7,7 +6,6 @@ import {
   type FormEvent,
   type ReactNode,
 } from 'react';
-import { createRoot } from 'react-dom/client';
 import {
   Inbox,
   BookOpen,
@@ -26,6 +24,7 @@ import {
   SlidersHorizontal,
   FileText,
   Package,
+  Save,
   UserRound,
   ShieldCheck,
   Plus,
@@ -49,6 +48,9 @@ import {
 } from './data';
 import { workspace } from './workspace';
 import { analysisIsStale } from './resource-version';
+import { Orders } from './Orders';
+import { DataManagement } from './DataManagement';
+import { api } from './api';
 import { ResourceEditor } from './ResourceEditor';
 import { ToolProgress } from './ToolProgress';
 import './tokens.css';
@@ -109,7 +111,7 @@ function Status({ conversation }: { conversation: Conversation }) {
     </span>
   );
 }
-function App() {
+export default function App() {
   const state = useSyncExternalStore(
     workspace.subscribe,
     workspace.getSnapshot,
@@ -126,7 +128,10 @@ function App() {
   };
   const [creating, setCreating] = useState(false),
     [followup, setFollowup] = useState<Record<string, string>>({}),
-    [loginError, setLoginError] = useState('');
+    [loginError, setLoginError] = useState(''),
+    [orderSaving, setOrderSaving] = useState(false),
+    [orderError, setOrderError] = useState(''),
+    [orderId, setOrderId] = useState<string | null>(null);
   useEffect(() => {
     void workspace.start();
   }, []);
@@ -175,7 +180,7 @@ function App() {
   );
   const attentionCount = items.filter(needsAttention).length;
   useEffect(() => {
-    document.title = `${page === 'inbox' ? 'DM 검토' : page === 'resources' ? '상품·정책' : '설정'} · 인별총무`;
+    document.title = `${page === 'inbox' ? 'DM 검토' : page === 'resources' ? '상품·정책' : page === 'orders' ? '주문' : '설정'} · 인별총무`;
   }, [page]);
   useEffect(() => {
     try {
@@ -345,6 +350,7 @@ function App() {
           {(
             [
               { id: 'inbox', label: 'DM 검토', Icon: Inbox },
+              { id: 'orders', label: '주문', Icon: Package },
               { id: 'resources', label: '상품·정책', Icon: BookOpen },
               { id: 'settings', label: '설정', Icon: Settings },
             ] as const
@@ -388,7 +394,9 @@ function App() {
                 ? 'DM 검토'
                 : page === 'resources'
                   ? '상품·정책'
-                  : '설정'}
+                  : page === 'orders'
+                    ? '주문'
+                    : '설정'}
             </strong>
           </div>
           <div className="top-actions">
@@ -993,6 +1001,42 @@ function App() {
                                   </div>
                                 </>
                               )}
+                              <button
+                                className="button primary"
+                                disabled={
+                                  orderSaving ||
+                                  !!busy ||
+                                  !currentLatest?.analysis?.order_draft
+                                }
+                                onClick={() => {
+                                  if (!currentLatest) return;
+                                  setOrderSaving(true);
+                                  setOrderError('');
+                                  void api
+                                    .saveOrder(currentLatest.request_id)
+                                    .then(async (o) => {
+                                      setOrderId(o.order_id);
+                                      await workspace.refreshResources();
+                                      setPage('orders');
+                                    })
+                                    .catch((e) =>
+                                      setOrderError(
+                                        e instanceof Error
+                                          ? e.message
+                                          : '주문 저장에 실패했습니다.',
+                                      ),
+                                    )
+                                    .finally(() => setOrderSaving(false));
+                                }}
+                              >
+                                <Save size={16} />
+                                {orderSaving ? '저장 중' : '주문으로 저장'}
+                              </button>
+                              {orderError && (
+                                <p className="error-copy" role="alert">
+                                  {orderError}
+                                </p>
+                              )}
                               <p className="small muted">
                                 주문 초안입니다. 입금 확인·주문 확정 전이며
                                 재고는 변경되지 않습니다.
@@ -1130,6 +1174,13 @@ function App() {
               </div>
             </>
           )}
+          {page === 'orders' && (
+            <Orders
+              initialId={orderId}
+              resources={state.resources}
+              onResources={(r) => workspace.acceptResources(r)}
+            />
+          )}
           {page === 'resources' && (
             <ResourceEditor
               resources={state.resources}
@@ -1255,6 +1306,17 @@ function App() {
                   연결 상태·자료 새로고침
                 </Button>
               </section>
+              <DataManagement
+                resources={state.resources}
+                onSaved={(r) => workspace.acceptResources(r)}
+                onChatsReset={async () => {
+                  setEdited({});
+                  setReviewed(new Set());
+                  setFollowup({});
+                  setOrderId(null);
+                  await workspace.clearChats();
+                }}
+              />
               <footer className="settings-footer">
                 인별총무 · 에이전트 작업 공간
                 <span>초안 수정·검토 표시는 이 화면에만 보관됩니다.</span>
@@ -1363,8 +1425,8 @@ function App() {
               수정과 검토 표시는 이 화면에서만 유지됩니다.
             </p>
             <p className="muted">
-              초기 자료는 가상 샘플입니다. 실제 DM 전송, 입금 확인, 주문 확정,
-              재고 변경은 수행하지 않습니다.
+              초기 자료는 가상 샘플입니다. 실제 DM 전송, 자동 입금 확인, 재고
+              변경은 수행하지 않습니다.
             </p>
             <Button primary onClick={() => setModal(null)}>
               확인
@@ -1375,8 +1437,3 @@ function App() {
     </div>
   );
 }
-createRoot(document.getElementById('root')!).render(
-  <StrictMode>
-    <App />
-  </StrictMode>,
-);

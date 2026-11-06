@@ -1,5 +1,13 @@
 import { z } from 'zod';
 import {
+  savedOrderSchema,
+  orderListSchema,
+  type OrderEdit,
+  type ConfirmOrder,
+  type Reviewed,
+} from '../../src/domain/commerce.js';
+import { importPreviewSchema } from '../../src/domain/data-contract.js';
+import {
   sessionSchema,
   healthSchema,
   resourcesSchema,
@@ -7,6 +15,7 @@ import {
   roomSummarySchema,
   roomDetailSchema,
   resultSchema,
+  type Resources,
 } from '../../src/domain/http-contract.js';
 import type { Product, Policy } from '../../src/domain/schema.js';
 import type { ChatRequest } from '../../src/domain/schema.js';
@@ -85,6 +94,113 @@ export const api = {
       15000,
       'PUT',
     ),
+  createProduct: (product: Product, snapshot: string) =>
+    request('/api/resources/products', resourcesSchema, {
+      product,
+      snapshot_id: snapshot,
+    }),
+  createPolicy: (policy: Policy, snapshot: string) =>
+    request('/api/resources/policies', resourcesSchema, {
+      policy,
+      snapshot_id: snapshot,
+    }),
+  deleteResource: (
+    kind: 'products' | 'policies',
+    id: string,
+    snapshots: Reviewed,
+  ) =>
+    request(
+      `/api/resources/${kind}/${encodeURIComponent(id)}`,
+      resourcesSchema,
+      { products: snapshots.products, policies: snapshots.policies },
+      15000,
+      'DELETE',
+    ),
+  dataStats: () =>
+    request(
+      '/api/data/stats',
+      z.object({
+        products: z.number(),
+        policies: z.number(),
+        orders: z.number(),
+        chats: z.number(),
+      }),
+    ),
+  orders: () => request('/api/orders', orderListSchema).then((r) => r.orders),
+  saveOrder: (request_id: string) =>
+    request(
+      '/api/orders/from-analysis',
+      z.object({ order: savedOrderSchema }),
+      { request_id },
+    ).then((r) => r.order),
+  updateOrder: (
+    id: string,
+    expected_version: number,
+    reviewed_snapshots: Reviewed,
+    draft: OrderEdit,
+  ) =>
+    request(
+      `/api/orders/${encodeURIComponent(id)}`,
+      z.object({ order: savedOrderSchema }),
+      {
+        expected_version,
+        reviewed_snapshots: {
+          products: reviewed_snapshots.products,
+          policies: reviewed_snapshots.policies,
+        },
+        draft,
+      },
+      15000,
+      'PUT',
+    ).then((r) => r.order),
+  confirmOrder: (id: string, input: ConfirmOrder) =>
+    request(
+      `/api/orders/${encodeURIComponent(id)}/confirm`,
+      z.object({ order: savedOrderSchema }),
+      input,
+    ).then((r) => r.order),
+  deleteOrder: (id: string, expected_version: number) =>
+    request(
+      `/api/orders/${encodeURIComponent(id)}`,
+      orderListSchema,
+      { expected_version },
+      15000,
+      'DELETE',
+    ).then((r) => r.orders),
+  resetData: (
+    scope: 'catalog' | 'orders' | 'chats',
+    snapshots: Resources['snapshots'],
+  ) =>
+    request(
+      `/api/data/reset/${scope}`,
+      z.object({ ok: z.boolean(), resources: resourcesSchema }),
+      { confirm: '초기화', snapshots },
+      30000,
+    ),
+  importApply: (token: string) =>
+    request('/api/data/import/apply', resourcesSchema, { token }),
+  importPreview: async (file: File) => {
+    const response = await fetch('/api/data/import/preview', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: {
+        'Content-Type':
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      },
+      body: file,
+      signal: AbortSignal.timeout(30000),
+    });
+    const raw: unknown = await response.json();
+    const parsed = importPreviewSchema.safeParse(raw);
+    if (parsed.success) return parsed.data;
+    const error = z
+      .object({ error: z.object({ message: z.string() }) })
+      .safeParse(raw);
+    throw new ApiError(
+      error.success ? error.data.error.message : '파일 분석에 실패했습니다.',
+      response.status,
+    );
+  },
   rooms: () =>
     request(
       '/api/conversations',

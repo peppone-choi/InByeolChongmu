@@ -8,6 +8,16 @@ import {
   productUpdateSchema,
   policyUpdateSchema,
 } from '../domain/http-contract.js';
+import {
+  saveOrderSchema,
+  updateOrderSchema,
+  confirmOrderSchema,
+  reviewedSchema,
+} from '../domain/commerce.js';
+import {
+  WorkbookImports,
+  exportCurrentWorkbook,
+} from '../storage/data-workbook.js';
 import { roomDetail, roomSummary } from './room-view.js';
 import { bodyLimit } from 'hono/body-limit';
 import { z } from 'zod';
@@ -17,6 +27,9 @@ import type { AgentRunner } from '../agent/types.js';
 import { ChatService } from '../agent/service.js';
 import { Store } from '../storage/store.js';
 import { Tools, toolCatalog } from '../tools/registry.js';
+const resourcesSchemaForReset = reviewedSchema
+  .extend({ orders: z.string() })
+  .strict();
 export function createApp(
   store: Store,
   config: Config,
@@ -34,6 +47,8 @@ export function createApp(
       cookie,
     );
   const chat = new ChatService(store, config, options.runner, options.clock);
+  const imports = new WorkbookImports(store);
+  let maintenance = false;
   let windowStart = Date.now(),
     requests = 0;
   app.use('*', async (c, next) => {
@@ -74,24 +89,32 @@ export function createApp(
         429,
         true,
       );
+    if (maintenance && c.req.method !== 'GET')
+      throw new AppError(
+        'MAINTENANCE',
+        '초기화 중입니다. 잠시 뒤 다시 시도하세요.',
+        409,
+      );
     await next();
   });
-  app.use(
-    '/api/*',
+  app.use('/api/*', async (c, next) =>
     bodyLimit({
-      maxSize: 65536,
+      maxSize:
+        c.req.path === '/api/data/import/preview' ? 2 * 1024 * 1024 : 65536,
       onError: () => {
         throw new AppError(
           'BODY_TOO_LARGE',
-          '요청 본문은 최대 64 KiB입니다.',
+          '일반 요청은 최대 64 KiB, 엑셀 파일은 최대 2 MiB입니다.',
           413,
         );
       },
-    }),
+    })(c, next),
   );
   app.use('/api/*', async (c, next) => {
     if (
-      ['POST', 'PUT'].includes(c.req.method) &&
+      c.req.path !== '/api/data/import/preview' &&
+      ['POST', 'PUT', 'DELETE'].includes(c.req.method) &&
+      c.req.path !== '/api/session' &&
       !/^application\/json(?:\s*;|$)/i.test(c.req.header('Content-Type') ?? '')
     )
       throw new AppError(
@@ -175,6 +198,150 @@ export function createApp(
       input.policy,
     );
     return c.json(resources());
+  });
+  app.post('/api/resources/products', async (c) => {
+    const input = productUpdateSchema.parse(await parseJson(c.req.raw));
+    store.createProduct(config.sellerId, input.snapshot_id, input.product);
+    return c.json(resources(), 201);
+  });
+  app.post('/api/resources/policies', async (c) => {
+    const input = policyUpdateSchema.parse(await parseJson(c.req.raw));
+    store.createPolicy(config.sellerId, input.snapshot_id, input.policy);
+    return c.json(resources(), 201);
+  });
+  app.delete('/api/resources/:kind/:id', async (c) => {
+    const kind = z.enum(['products', 'policies']).parse(c.req.param('kind'));
+    const snapshots = reviewedSchema.parse(await parseJson(c.req.raw));
+    store.deleteResource(
+      config.sellerId,
+      kind === 'products' ? 'product' : 'policy',
+      c.req.param('id'),
+      snapshots,
+    );
+    return c.json(resources());
+  });
+  app.get('/api/orders', (c) =>
+    c.json({ orders: store.commerce.list(config.sellerId) }),
+  );
+  app.post('/api/orders/from-analysis', async (c) => {
+    const input = saveOrderSchema.parse(await parseJson(c.req.raw));
+    return c.json(
+      {
+        order: store.commerce.saveAnalysis(
+          config.sellerId,
+          input.request_id,
+          options.clock?.(),
+        ),
+      },
+      201,
+    );
+  });
+  app.put('/api/orders/:id', async (c) => {
+    const input = updateOrderSchema.parse(await parseJson(c.req.raw));
+    return c.json({
+      order: store.commerce.update(
+        config.sellerId,
+        c.req.param('id'),
+        input.expected_version,
+        input.reviewed_snapshots,
+        input.draft,
+        options.clock?.(),
+      ),
+    });
+  });
+  app.post('/api/orders/:id/confirm', async (c) => {
+    const input = confirmOrderSchema.parse(await parseJson(c.req.raw));
+    return c.json({
+      order: store.commerce.confirm(
+        config.sellerId,
+        c.req.param('id'),
+        input,
+        options.clock?.(),
+      ),
+    });
+  });
+  app.delete('/api/orders/:id', async (c) => {
+    const { expected_version } = z
+      .object({ expected_version: z.number().int().positive() })
+      .strict()
+      .parse(await parseJson(c.req.raw));
+    store.commerce.remove(config.sellerId, c.req.param('id'), expected_version);
+    return c.json({ orders: store.commerce.list(config.sellerId) });
+  });
+  app.get('/api/data/stats', (c) => c.json(store.dataStats(config.sellerId)));
+  app.get('/api/data/export', async (c) => {
+    const format = z
+      .enum(['json', 'xlsx'])
+      .parse(c.req.query('format') ?? 'xlsx');
+    c.header(
+      'Content-Disposition',
+      `attachment; filename="inbyeol-data.${format}"`,
+    );
+    if (format === 'json') return c.json(store.exportCurrent(config.sellerId));
+    c.header(
+      'Content-Type',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    );
+    return c.body(
+      new Uint8Array(await exportCurrentWorkbook(store, config.sellerId)),
+    );
+  });
+  app.post('/api/data/import/preview', async (c) => {
+    if (
+      !/^application\/vnd.openxmlformats-officedocument.spreadsheetml.sheet(?:;|$)/i.test(
+        c.req.header('Content-Type') ?? '',
+      )
+    )
+      throw new AppError('XLSX_REQUIRED', '.xlsx 파일을 선택하세요.', 415);
+    return c.json(
+      await imports.preview(
+        config.sellerId,
+        Buffer.from(await c.req.arrayBuffer()),
+      ),
+    );
+  });
+  app.post('/api/data/import/apply', async (c) => {
+    const { token } = z
+      .object({ token: z.uuid() })
+      .strict()
+      .parse(await parseJson(c.req.raw));
+    imports.apply(config.sellerId, token);
+    return c.json(resources());
+  });
+  app.post('/api/data/reset/:scope', async (c) => {
+    const scope = z
+      .enum(['catalog', 'orders', 'chats'])
+      .parse(c.req.param('scope'));
+    const input = z
+      .object({
+        confirm: z.literal('초기화'),
+        snapshots: resourcesSchemaForReset,
+      })
+      .strict()
+      .parse(await parseJson(c.req.raw));
+    if (store.hasRunning(config.sellerId))
+      throw new AppError('AGENT_BUSY', '분석이 끝난 뒤 초기화하세요.', 409);
+    if (scope === 'catalog')
+      store.resetCatalog(config.sellerId, input.snapshots);
+    if (scope === 'orders')
+      store.commerce.reset(config.sellerId, input.snapshots.orders);
+    if (scope === 'chats') {
+      if (!chat.runner.resetHistory)
+        throw new AppError(
+          'RESET_UNAVAILABLE',
+          '실행기의 기록 초기화가 지원되지 않습니다.',
+          503,
+        );
+      maintenance = true;
+      try {
+        await chat.runner.resetHistory();
+        store.resetChats(config.sellerId);
+      } finally {
+        maintenance = false;
+      }
+    }
+    imports.clear();
+    return c.json({ ok: true, resources: resources() });
   });
   app.get('/api/tools', (c) => c.json({ tools: toolCatalog() }));
   app.post('/api/tools/:name', async (c) => {

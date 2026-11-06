@@ -88,6 +88,11 @@ export class Workspace {
       this.patch({ loading: false });
     }
   }
+  async clearChats() {
+    for (const [id, n] of this.loads) this.loads.set(id, n + 1);
+    this.patch({ rooms: [], details: {}, pending: {}, activeId: null });
+    await this.start();
+  }
   async refreshResources() {
     const resources = await this.transport.resources();
     this.patch({ resources });

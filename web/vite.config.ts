@@ -37,7 +37,10 @@ export default defineConfig(({ command, isPreview }) => {
             ) {
               const host = req.headers.host;
               if (
-                !['127.0.0.1:5173', 'localhost:5173'].includes(host ?? '') ||
+                ![
+                  `127.0.0.1:${server.config.server.port}`,
+                  `localhost:${server.config.server.port}`,
+                ].includes(host ?? '') ||
                 (req.headers.origin && req.headers.origin !== `http://${host}`)
               ) {
                 res.statusCode = 403;

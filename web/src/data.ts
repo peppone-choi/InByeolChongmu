@@ -1,7 +1,7 @@
 import type { Analysis } from '../../src/domain/schema';
 import type { State } from './workspace';
 export type Category = 'all' | 'attention' | 'ready';
-export type Page = 'inbox' | 'resources' | 'settings';
+export type Page = 'inbox' | 'resources' | 'orders' | 'settings';
 export type Conversation = {
   id: string;
   name: string;

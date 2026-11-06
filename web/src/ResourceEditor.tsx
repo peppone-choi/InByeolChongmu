@@ -7,6 +7,8 @@ import {
   X,
   LoaderCircle,
   RefreshCw,
+  Plus,
+  Trash2,
 } from 'lucide-react';
 import type { Resources } from '../../src/domain/http-contract';
 import {
@@ -18,8 +20,8 @@ import {
 import { api, ApiError } from './api';
 import { money, policyNames } from './data';
 type Editing =
-  | { kind: 'product'; value: Product; snapshot: string }
-  | { kind: 'policy'; value: Policy; snapshot: string };
+  | { kind: 'product'; value: Product; snapshot: string; create?: boolean }
+  | { kind: 'policy'; value: Policy; snapshot: string; create?: boolean };
 const localTime = (value: string) => {
   const date = new Date(value);
   return new Date(date.getTime() - date.getTimezoneOffset() * 60000)
@@ -38,7 +40,13 @@ export function ResourceEditor({
     [success, setSuccess] = useState(''),
     [saving, setSaving] = useState(false),
     [conflict, setConflict] = useState(false),
-    [generation, setGeneration] = useState(0);
+    [generation, setGeneration] = useState(0),
+    [policyKind, setPolicyKind] = useState('text'),
+    [removing, setRemoving] = useState<{
+      kind: 'products' | 'policies';
+      id: string;
+      name: string;
+    } | null>(null);
   const editorRef = useRef<HTMLElement>(null);
   useEffect(() => {
     const editor = editorRef.current;
@@ -109,12 +117,15 @@ export function ResourceEditor({
           unit_price_krw: Number(form.get('price:' + index)),
           stock_available: Number(form.get('stock:' + index)),
         }));
-        updated = await api.updateProduct(
-          productSchema.parse(product),
-          editing.snapshot,
-        );
+        updated = await (
+          editing.create ? api.createProduct : api.updateProduct
+        )(productSchema.parse(product), editing.snapshot);
       } else {
         const policy = structuredClone(editing.value);
+        policy.title =
+          String(form.get('title') ?? '').trim() ||
+          policyNames[policy.policy_id] ||
+          policy.policy_id;
         if (policy.shipping_fee_krw !== undefined)
           policy.shipping_fee_krw = Number(form.get('shipping'));
         else if (policy.discount_krw !== undefined) {
@@ -124,7 +135,7 @@ export function ResourceEditor({
         } else if (policy.next_dispatch_date)
           policy.next_dispatch_date = String(form.get('dispatch'));
         else policy.rule = String(form.get('rule') ?? '').trim();
-        updated = await api.updatePolicy(
+        updated = await (editing.create ? api.createPolicy : api.updatePolicy)(
           policySchema.parse(policy),
           editing.snapshot,
         );
@@ -174,6 +185,147 @@ export function ResourceEditor({
           샘플입니다.
         </p>
       </div>
+      <div className="data-actions">
+        <button
+          className="button primary"
+          disabled={!resources || !!editing || saving}
+          onClick={() => {
+            if (!resources) return;
+            setEditing({
+              kind: 'product',
+              create: true,
+              snapshot: resources.snapshots.products,
+              value: {
+                product_id: crypto.randomUUID(),
+                name: '',
+                aliases: [],
+                material: null,
+                measurements_cm: null,
+                closes_at: new Date(Date.now() + 30 * 86400000).toISOString(),
+                variants: [
+                  {
+                    sku: crypto.randomUUID(),
+                    color: '',
+                    size: '',
+                    unit_price_krw: 0,
+                    stock_available: 0,
+                  },
+                ],
+              },
+            });
+            setError('');
+            setGeneration((n) => n + 1);
+          }}
+        >
+          <Plus size={16} />
+          상품 추가
+        </button>
+        <label>
+          새 정책 종류
+          <select
+            value={policyKind}
+            onChange={(e) => setPolicyKind(e.target.value)}
+          >
+            <option value="text">안내 문구</option>
+            <option value="shipping">배송비</option>
+            <option value="discount">상품 할인</option>
+            <option value="dispatch">출고 예정일</option>
+          </select>
+        </label>
+        <button
+          className="button"
+          disabled={!resources || !!editing || saving}
+          onClick={() => {
+            if (!resources) return;
+            const extra =
+              policyKind === 'shipping'
+                ? { shipping_fee_krw: 0 }
+                : policyKind === 'discount'
+                  ? {
+                      product_id: resources.products[0]?.product_id ?? '',
+                      minimum_quantity: 2,
+                      discount_krw: 0,
+                    }
+                  : policyKind === 'dispatch'
+                    ? {
+                        next_dispatch_date: new Date()
+                          .toISOString()
+                          .slice(0, 10),
+                      }
+                    : {};
+            setEditing({
+              kind: 'policy',
+              create: true,
+              snapshot: resources.snapshots.policies,
+              value: {
+                policy_id: crypto.randomUUID(),
+                title: '',
+                rule: '정책 내용을 입력하세요.',
+                ...extra,
+              },
+            });
+            setError('');
+            setGeneration((n) => n + 1);
+          }}
+        >
+          <Plus size={16} />
+          정책 추가
+        </button>
+      </div>
+      {!resources?.products.length && (
+        <p className="muted">
+          상품이 없습니다. 상품을 추가하거나 설정에서 엑셀을 가져오세요.
+        </p>
+      )}
+      {error && !editing && (
+        <p className="error-copy" role="alert">
+          {error}
+        </p>
+      )}
+      {removing && (
+        <div
+          className="inline-confirm"
+          role="alertdialog"
+          aria-label="자료 삭제 확인"
+        >
+          <h2>{removing.name} 삭제</h2>
+          <p>
+            상품을 삭제하면 연결된 할인 정책도 삭제합니다. 과거 주문과 대화는
+            유지합니다. 복구할 수 없습니다.
+          </p>
+          <button
+            className="button"
+            disabled={saving}
+            onClick={() => setRemoving(null)}
+          >
+            취소
+          </button>
+          <button
+            className="button danger"
+            disabled={saving}
+            onClick={() => {
+              if (!resources) return;
+              setSaving(true);
+              setError('');
+              void api
+                .deleteResource(removing.kind, removing.id, resources.snapshots)
+                .then((r) => {
+                  onSaved(r);
+                  setRemoving(null);
+                  setSuccess('자료를 삭제했습니다.');
+                })
+                .catch((e) =>
+                  setError(
+                    e instanceof Error ? e.message : '삭제에 실패했습니다.',
+                  ),
+                )
+                .finally(() => setSaving(false));
+            }}
+          >
+            삭제 실행
+          </button>
+        </div>
+      )}
       {success && (
         <p className="save-success" role="status">
           {success}
@@ -187,9 +339,13 @@ export function ResourceEditor({
         >
           <header>
             <h2>
-              {editing.kind === 'product'
-                ? `${editing.value.name} 수정`
-                : `${policyNames[editing.value.policy_id] ?? editing.value.policy_id} 수정`}
+              {editing.create
+                ? editing.kind === 'product'
+                  ? '상품 추가'
+                  : '정책 추가'
+                : editing.kind === 'product'
+                  ? `${editing.value.name} 수정`
+                  : `${editing.value.title ?? policyNames[editing.value.policy_id] ?? editing.value.policy_id} 수정`}
             </h2>
             <button
               className="icon-button"
@@ -209,8 +365,8 @@ export function ResourceEditor({
               {editing.kind === 'product' ? (
                 <>
                   <p className="small muted">
-                    상품 ID와 SKU는 주문 이력 연결을 위해 고정됩니다. 옵션
-                    추가·삭제는 이 화면에서 지원하지 않습니다.
+                    상품 ID는 고정됩니다. 옵션은 추가·삭제할 수 있습니다. 과거
+                    주문은 저장 당시 정보를 유지합니다.
                   </p>
                   <label>
                     상품명
@@ -273,7 +429,27 @@ export function ResourceEditor({
                   <h3>옵션별 가격·재고</h3>
                   {editing.value.variants.map((variant, index) => (
                     <div className="variant-editor" key={variant.sku}>
-                      <strong>{variant.sku}</strong>
+                      <strong>옵션 {index + 1}</strong>
+                      <button
+                        type="button"
+                        className="icon-button"
+                        aria-label={`옵션 ${index + 1} 삭제`}
+                        disabled={editing.value.variants.length === 1}
+                        onClick={() => {
+                          if (editing.kind === 'product')
+                            setEditing({
+                              ...editing,
+                              value: {
+                                ...editing.value,
+                                variants: editing.value.variants.filter(
+                                  (_, n) => n !== index,
+                                ),
+                              },
+                            });
+                        }}
+                      >
+                        <Trash2 size={16} />
+                      </button>
                       <label>
                         색상
                         <input
@@ -318,9 +494,48 @@ export function ResourceEditor({
                       </label>
                     </div>
                   ))}
+                  <button
+                    type="button"
+                    className="button"
+                    onClick={() => {
+                      if (editing.kind === 'product')
+                        setEditing({
+                          ...editing,
+                          value: {
+                            ...editing.value,
+                            variants: [
+                              ...editing.value.variants,
+                              {
+                                sku: crypto.randomUUID(),
+                                color: '',
+                                size: '',
+                                unit_price_krw: 0,
+                                stock_available: 0,
+                              },
+                            ],
+                          },
+                        });
+                    }}
+                  >
+                    <Plus size={16} />
+                    옵션 추가
+                  </button>
                 </>
               ) : (
                 <>
+                  <label>
+                    정책 제목
+                    <input
+                      name="title"
+                      required
+                      maxLength={100}
+                      defaultValue={
+                        editing.value.title ??
+                        policyNames[editing.value.policy_id] ??
+                        ''
+                      }
+                    />
+                  </label>
                   <p className="small muted">
                     정책 ID: {editing.value.policy_id}. 입금 확인·주문 확정·환불
                     승인은 계속 판매자가 맡습니다.
@@ -485,6 +700,20 @@ export function ResourceEditor({
                 <Pencil size={14} />
                 수정
               </button>
+              <button
+                className="icon-button danger"
+                aria-label={`${product.name} 삭제`}
+                disabled={!!editing || saving}
+                onClick={() =>
+                  setRemoving({
+                    kind: 'products',
+                    id: product.product_id,
+                    name: product.name,
+                  })
+                }
+              >
+                <Trash2 size={16} />
+              </button>
             </div>
             <div className="variant-list">
               {product.variants.map((variant) => (
@@ -518,15 +747,36 @@ export function ResourceEditor({
         {resources?.policies.map((policy) => (
           <article key={policy.policy_id}>
             <header>
-              <h3>{policyNames[policy.policy_id] ?? policy.policy_id}</h3>
+              <h3>
+                {policy.title ??
+                  policyNames[policy.policy_id] ??
+                  policy.policy_id}
+              </h3>
               <button
                 className="button"
-                aria-label={`${policyNames[policy.policy_id] ?? policy.policy_id} 수정`}
+                aria-label={`${policy.title ?? policyNames[policy.policy_id] ?? policy.policy_id} 수정`}
                 disabled={!!editing || saving}
                 onClick={() => open('policy', policy.policy_id)}
               >
                 <Pencil size={14} />
                 수정
+              </button>
+              <button
+                className="icon-button danger"
+                aria-label={`${policy.title ?? policyNames[policy.policy_id] ?? policy.policy_id} 삭제`}
+                disabled={!!editing || saving}
+                onClick={() =>
+                  setRemoving({
+                    kind: 'policies',
+                    id: policy.policy_id,
+                    name:
+                      policy.title ??
+                      policyNames[policy.policy_id] ??
+                      policy.policy_id,
+                  })
+                }
+              >
+                <Trash2 size={16} />
               </button>
             </header>
             <p>{policy.rule}</p>

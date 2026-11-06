@@ -3,6 +3,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { chmodSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { z } from 'zod';
+import { Commerce } from './commerce.js';
 import type { Analysis } from '../domain/schema.js';
 import type { AgentRun, RunInput, ToolTrace } from '../agent/types.js';
 import { AppError } from '../domain/errors.js';
@@ -51,6 +52,7 @@ export type Message = {
 
 export class Store {
   private readonly db: DatabaseSync;
+  readonly commerce: Commerce;
   constructor(public readonly path: string) {
     if (path !== ':memory:')
       mkdirSync(dirname(resolve(path)), { recursive: true, mode: 0o700 });
@@ -69,6 +71,7 @@ export class Store {
       CREATE UNIQUE INDEX IF NOT EXISTS one_active_room_run ON agent_runs(seller_id,conversation_id) WHERE status='running';
       CREATE TABLE IF NOT EXISTS agent_tool_calls(run_id TEXT NOT NULL REFERENCES agent_runs(id),call_id TEXT NOT NULL,name TEXT NOT NULL,success INTEGER NOT NULL,result TEXT NOT NULL CHECK(json_valid(result)),PRIMARY KEY(run_id,call_id)) STRICT;
       INSERT OR IGNORE INTO schema_migrations VALUES(2);`);
+    this.commerce = new Commerce(this.db, this);
   }
   close() {
     this.db.close();
@@ -190,7 +193,10 @@ export class Store {
     );
   }
   orders(sellerId: string): Order[] {
-    return this.readRecords(sellerId, 'order').map((p) => orderSchema.parse(p));
+    return [
+      ...this.readRecords(sellerId, 'order').map((p) => orderSchema.parse(p)),
+      ...this.commerce.projection(sellerId),
+    ];
   }
   private readRecords(sellerId: string, type: SourceType): unknown[] {
     this.source(sellerId, type);
@@ -218,17 +224,10 @@ export class Store {
           '상품을 찾을 수 없습니다.',
           404,
         );
-      if (
-        product.product_id !== id ||
-        JSON.stringify(previous.variants.map((v) => v.sku).sort()) !==
-          JSON.stringify(product.variants.map((v) => v.sku).sort())
-      )
-        throw new AppError(
-          'IMMUTABLE_ID',
-          '상품 ID와 SKU는 변경·추가·삭제할 수 없습니다.',
-        );
+      if (product.product_id !== id)
+        throw new AppError('IMMUTABLE_ID', '상품 ID는 변경할 수 없습니다.');
       products[index] = product;
-      return this.writeProducts(sellerId, products);
+      return this.writeProducts(sellerId, products, true);
     });
   }
   updatePolicy(sellerId: string, id: string, snapshot: string, policy: Policy) {
@@ -303,13 +302,18 @@ export class Store {
   replaceProducts(sellerId: string, products: Product[]) {
     return this.transaction(() => this.writeProducts(sellerId, products));
   }
-  private writeProducts(sellerId: string, products: Product[]) {
-    const valid = z.array(productSchema).min(1).max(10000).parse(products);
+  private writeProducts(
+    sellerId: string,
+    products: Product[],
+    allowRemoval = false,
+  ) {
+    const valid = z.array(productSchema).max(10000).parse(products);
     validateProducts(valid);
     this.source(sellerId, 'product');
     validatePolicies(this.policies(sellerId), valid);
     const skus = new Set(valid.flatMap((p) => p.variants.map((v) => v.sku)));
     if (
+      !allowRemoval &&
       this.orders(sellerId).some((o) => o.items.some((i) => !skus.has(i.sku)))
     )
       throw new AppError(
@@ -336,6 +340,197 @@ export class Store {
       )
       .run(snapshot, new Date().toISOString(), sellerId, 'product');
     return { snapshot_id: snapshot, products: valid.length };
+  }
+  createProduct(seller: string, snapshot: string, product: Product) {
+    return this.transaction(() => {
+      this.checkSnapshot(seller, 'product', snapshot);
+      const products = this.products(seller);
+      products.push(productSchema.parse(product));
+      return this.writeProducts(seller, products, true);
+    });
+  }
+  createPolicy(seller: string, snapshot: string, policy: Policy) {
+    return this.transaction(() => {
+      this.checkSnapshot(seller, 'policy', snapshot);
+      const policies = this.policies(seller);
+      if (policies.some((p) => p.policy_id === policy.policy_id))
+        throw new AppError('DUPLICATE_ID', '정책 ID가 중복됩니다.');
+      policies.push(canonicalPolicy(policySchema.parse(policy)));
+      this.writePolicies(seller, policies);
+    });
+  }
+  private writePolicies(seller: string, policies: Policy[]) {
+    validatePolicies(policies, this.products(seller));
+    this.db
+      .prepare("DELETE FROM records WHERE seller_id=? AND type='policy'")
+      .run(seller);
+    for (const policy of policies)
+      this.db
+        .prepare('INSERT INTO records VALUES(?,?,?,?)')
+        .run(
+          seller,
+          'policy',
+          policy.policy_id,
+          JSON.stringify(canonicalPolicy(policy)),
+        );
+    this.db
+      .prepare(
+        "UPDATE sources SET snapshot_id=?,reference_time=? WHERE seller_id=? AND type='policy'",
+      )
+      .run('policies-' + randomUUID(), new Date().toISOString(), seller);
+  }
+  deleteResource(
+    seller: string,
+    kind: 'product' | 'policy',
+    id: string,
+    snapshots: { products: string; policies: string },
+  ) {
+    return this.transaction(() => {
+      this.checkSnapshot(seller, 'product', snapshots.products);
+      this.checkSnapshot(seller, 'policy', snapshots.policies);
+      const entries =
+        kind === 'product' ? this.products(seller) : this.policies(seller);
+      if (
+        !entries.some(
+          (e) =>
+            ('product_id' in e && kind === 'product'
+              ? e.product_id
+              : 'policy_id' in e
+                ? e.policy_id
+                : '') === id,
+        )
+      )
+        throw new AppError(
+          'RESOURCE_NOT_FOUND',
+          '자료를 찾을 수 없습니다.',
+          404,
+        );
+      // Removing a product also removes its explicit discount policy, never old orders.
+      this.writePolicies(
+        seller,
+        this.policies(seller).filter((p) =>
+          kind === 'policy' ? p.policy_id !== id : p.product_id !== id,
+        ),
+      );
+      if (kind === 'product')
+        this.writeProducts(
+          seller,
+          this.products(seller).filter((p) => p.product_id !== id),
+          true,
+        );
+    });
+  }
+  resetCatalog(
+    seller: string,
+    snapshots: { products: string; policies: string },
+  ) {
+    return this.transaction(() => {
+      this.checkSnapshot(seller, 'product', snapshots.products);
+      this.checkSnapshot(seller, 'policy', snapshots.policies);
+      this.writePolicies(seller, []);
+      this.writeProducts(seller, [], true);
+    });
+  }
+  importCatalog(
+    seller: string,
+    snapshots: { products: string; policies: string },
+    products: Product[],
+    policies: Policy[],
+  ) {
+    return this.transaction(() => {
+      this.checkSnapshot(seller, 'product', snapshots.products);
+      this.checkSnapshot(seller, 'policy', snapshots.policies);
+      validateProducts(products);
+      validatePolicies(policies, products);
+      this.db
+        .prepare("DELETE FROM records WHERE seller_id=? AND type='policy'")
+        .run(seller);
+      this.writeProducts(seller, products, true);
+      this.writePolicies(seller, policies);
+    });
+  }
+  hasRunning(seller: string) {
+    return !!this.db
+      .prepare(
+        "SELECT 1 FROM agent_runs WHERE seller_id=? AND status='running'",
+      )
+      .get(seller);
+  }
+  resetChats(seller: string) {
+    return this.transaction(() => {
+      if (this.hasRunning(seller))
+        throw new AppError(
+          'AGENT_BUSY',
+          '진행 중인 분석이 끝난 뒤 초기화하세요.',
+          409,
+        );
+      this.db
+        .prepare(
+          'DELETE FROM agent_tool_calls WHERE run_id IN (SELECT id FROM agent_runs WHERE seller_id=?)',
+        )
+        .run(seller);
+      this.db.prepare('DELETE FROM agent_runs WHERE seller_id=?').run(seller);
+      this.db.prepare('DELETE FROM messages WHERE seller_id=?').run(seller);
+      this.db
+        .prepare('DELETE FROM conversations WHERE seller_id=?')
+        .run(seller);
+    });
+  }
+  dataStats(seller: string) {
+    return {
+      products: this.products(seller).length,
+      policies: this.policies(seller).length,
+      orders: this.commerce.list(seller).length,
+      chats: Number(
+        this.db
+          .prepare('SELECT COUNT(*) AS n FROM conversations WHERE seller_id=?')
+          .get(seller)!.n,
+      ),
+    };
+  }
+  exportCurrent(seller: string) {
+    return {
+      schema_version: '1.0',
+      exported_at: new Date().toISOString(),
+      seller_id: seller,
+      products: this.products(seller),
+      policies: this.policies(seller),
+      orders: this.commerce.list(seller),
+      conversations: this.db
+        .prepare('SELECT * FROM conversations WHERE seller_id=? ORDER BY rowid')
+        .all(seller),
+      messages: this.db
+        .prepare(
+          'SELECT id,conversation_id,request_id,role,text,created_at FROM messages WHERE seller_id=? ORDER BY rowid',
+        )
+        .all(seller),
+      analyses: this.db
+        .prepare(
+          'SELECT request_id,conversation_id,status,analysis FROM agent_runs WHERE seller_id=? ORDER BY rowid',
+        )
+        .all(seller)
+        .map((r) => ({
+          request_id: String(r.request_id),
+          conversation_id: String(r.conversation_id),
+          status: String(r.status),
+          analysis: r.analysis
+            ? (JSON.parse(String(r.analysis)) as unknown)
+            : null,
+        })),
+      tool_calls: this.db
+        .prepare(
+          'SELECT t.* FROM agent_tool_calls t JOIN agent_runs r ON r.id=t.run_id WHERE r.seller_id=? ORDER BY t.rowid',
+        )
+        .all(seller)
+        .map((r) => ({
+          ...r,
+          result: JSON.parse(String(r.result)) as unknown,
+        })),
+      snapshots: {
+        ...this.commerce.snapshots(seller),
+        orders: this.source(seller, 'order').snapshot_id,
+      },
+    };
   }
   createConversation(
     sellerId: string,
@@ -707,14 +902,30 @@ export function validateProducts(products: Product[]) {
 
 export function validatePolicies(policies: Policy[], products: Product[]) {
   if (
-    policies.filter((p) => p.shipping_fee_krw !== undefined).length !== 1 ||
+    policies.filter((p) => p.shipping_fee_krw !== undefined).length > 1 ||
     policies.filter((p) => p.discount_krw !== undefined).length > 1
   )
     throw new AppError(
       'UNSUPPORTED_POLICY',
-      '배송비는 1개, 상품별 단일 할인은 최대 1개만 지원합니다.',
+      '배송비와 상품별 단일 할인은 각각 최대 1개만 지원합니다. 견적에는 배송비 정책이 필요합니다.',
     );
+  if (new Set(policies.map((p) => p.policy_id)).size !== policies.length)
+    throw new AppError('DUPLICATE_ID', '정책 ID가 중복됩니다.');
   for (const policy of policies) {
+    if (
+      [
+        policy.shipping_fee_krw !== undefined,
+        policy.discount_krw !== undefined,
+        policy.next_dispatch_date !== undefined,
+      ].filter(Boolean).length > 1 ||
+      (policy.discount_krw === undefined &&
+        (policy.minimum_quantity !== undefined ||
+          policy.product_id !== undefined))
+    )
+      throw new AppError(
+        'INVALID_POLICY',
+        '정책당 하나의 계산·일정 종류를 사용하세요.',
+      );
     if (!policy.rule.trim())
       throw new AppError('INVALID_POLICY', '정책 문구를 입력하세요.');
     if (policy.discount_krw !== undefined) {
@@ -732,4 +943,24 @@ export function validatePolicies(policies: Policy[], products: Product[]) {
         );
     }
   }
+}
+
+function canonicalPolicy(p: Policy): Policy {
+  const money = (n: number) => new Intl.NumberFormat('ko-KR').format(n) + '원';
+  if (p.shipping_fee_krw !== undefined)
+    return {
+      ...p,
+      rule: `지역별 추가금 없이 주문당 배송비 ${money(p.shipping_fee_krw)} 적용.`,
+    };
+  if (p.discount_krw !== undefined)
+    return {
+      ...p,
+      rule: `${p.product_id} 수량 합계가 ${p.minimum_quantity}개 이상이면 주문당 ${money(p.discount_krw)} 1회 할인. 다른 상품 수량은 합산하지 않으며 중복 할인 없음.`,
+    };
+  if (p.next_dispatch_date)
+    return {
+      ...p,
+      rule: `다음 출고 예정일은 ${p.next_dispatch_date}. 입금 확인·주문 확정 후 적용. 도착일·현재 배송 상태는 보장하지 않음.`,
+    };
+  return p;
 }
