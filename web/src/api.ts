@@ -1,5 +1,16 @@
 import { z } from 'zod';
 import {
+  shipmentResultSchema,
+  shipmentHistorySchema,
+  parcelTemplateViewSchema,
+  parcelTemplateSchema,
+  parcelSelectionSchema,
+  parcelPreviewSchema,
+  parcelCreateSchema,
+  parcelExportSchema,
+  type ShipmentCommand,
+} from '../../src/domain/shipping.js';
+import {
   savedOrderSchema,
   orderListSchema,
   type OrderEdit,
@@ -116,6 +127,39 @@ export const api = {
       15000,
       'DELETE',
     ),
+  shipmentHistory: (id: string) =>
+    request(
+      `/api/orders/${encodeURIComponent(id)}/shipments`,
+      shipmentHistorySchema,
+    ).then((r) => r.events),
+  shipment: (id: string, input: ShipmentCommand) =>
+    request(
+      `/api/orders/${encodeURIComponent(id)}/shipments`,
+      shipmentResultSchema,
+      input,
+    ),
+  parcelTemplate: () =>
+    request('/api/parcel/template', parcelTemplateViewSchema),
+  saveParcelTemplate: (
+    version: string,
+    template: z.infer<typeof parcelTemplateSchema>,
+  ) =>
+    request(
+      '/api/parcel/template',
+      parcelTemplateViewSchema,
+      { version, template },
+      15000,
+      'PUT',
+    ),
+  parcelPreview: (input: z.infer<typeof parcelSelectionSchema>) =>
+    request('/api/parcel/preview', parcelPreviewSchema, input),
+  parcelCreate: (input: z.infer<typeof parcelCreateSchema>) =>
+    request('/api/parcel/exports', parcelExportSchema, input),
+  parcelExports: () =>
+    request(
+      '/api/parcel/exports',
+      z.object({ exports: z.array(parcelExportSchema) }),
+    ).then((r) => r.exports),
   dataStats: () =>
     request(
       '/api/data/stats',
@@ -217,3 +261,27 @@ export const api = {
     request('/api/chat', resultSchema, input, timeout),
 };
 export type Api = typeof api;
+
+export async function downloadParcel(id: string) {
+  const response = await fetch(
+    `/api/parcel/exports/${encodeURIComponent(id)}/file`,
+    { credentials: 'same-origin', signal: AbortSignal.timeout(30000) },
+  );
+  if (!response.ok) {
+    const raw: unknown = await response.json();
+    const error = z
+      .object({ error: z.object({ message: z.string() }) })
+      .safeParse(raw);
+    throw new ApiError(
+      error.success ? error.data.error.message : '파일을 내려받지 못했습니다.',
+      response.status,
+    );
+  }
+  const blob = await response.blob(),
+    url = URL.createObjectURL(blob),
+    link = document.createElement('a');
+  link.href = url;
+  link.download = `parcel-${id}.xlsx`;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}

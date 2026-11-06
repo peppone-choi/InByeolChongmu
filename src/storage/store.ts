@@ -3,6 +3,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { chmodSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { z } from 'zod';
+import { Parcels } from './parcel.js';
 import { Commerce } from './commerce.js';
 import type { Analysis } from '../domain/schema.js';
 import type { AgentRun, RunInput, ToolTrace } from '../agent/types.js';
@@ -53,6 +54,7 @@ export type Message = {
 export class Store {
   private readonly db: DatabaseSync;
   readonly commerce: Commerce;
+  readonly parcels: Parcels;
   constructor(public readonly path: string) {
     if (path !== ':memory:')
       mkdirSync(dirname(resolve(path)), { recursive: true, mode: 0o700 });
@@ -72,6 +74,7 @@ export class Store {
       CREATE TABLE IF NOT EXISTS agent_tool_calls(run_id TEXT NOT NULL REFERENCES agent_runs(id),call_id TEXT NOT NULL,name TEXT NOT NULL,success INTEGER NOT NULL,result TEXT NOT NULL CHECK(json_valid(result)),PRIMARY KEY(run_id,call_id)) STRICT;
       INSERT OR IGNORE INTO schema_migrations VALUES(2);`);
     this.commerce = new Commerce(this.db, this);
+    this.parcels = new Parcels(this.db, this);
   }
   close() {
     this.db.close();
@@ -501,6 +504,14 @@ export class Store {
       products: this.products(seller),
       policies: this.policies(seller),
       orders: this.commerce.list(seller),
+      shipment_events: this.db
+        .prepare(
+          'SELECT payload FROM shipment_events WHERE seller_id=? ORDER BY rowid',
+        )
+        .all(seller)
+        .map((r) => JSON.parse(String(r.payload)) as unknown),
+      parcel_template: this.parcels.template(seller),
+      parcel_exports: this.parcels.list(seller),
       conversations: this.db
         .prepare('SELECT * FROM conversations WHERE seller_id=? ORDER BY rowid')
         .all(seller),

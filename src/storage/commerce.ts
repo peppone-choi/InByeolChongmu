@@ -2,6 +2,12 @@ import type { DatabaseSync } from 'node:sqlite';
 import { randomUUID, createHash } from 'node:crypto';
 import type { Store } from './store.js';
 import { Tools } from '../tools/registry.js';
+import {
+  shipmentCommandSchema,
+  shipmentEventSchema,
+  shipmentResultSchema,
+  type ShipmentCommand,
+} from '../domain/shipping.js';
 import { AppError } from '../domain/errors.js';
 import { amountSchema, orderSchema, type Order } from '../domain/schema.js';
 import {
@@ -20,7 +26,9 @@ export class Commerce {
     db.exec(`CREATE TABLE IF NOT EXISTS managed_orders(seller_id TEXT NOT NULL,id TEXT NOT NULL,payload TEXT NOT NULL CHECK(json_valid(payload)),PRIMARY KEY(seller_id,id)) STRICT;
     CREATE TABLE IF NOT EXISTS order_origins(seller_id TEXT NOT NULL,request_id TEXT NOT NULL,order_id TEXT NOT NULL,PRIMARY KEY(seller_id,request_id)) STRICT;
     CREATE TABLE IF NOT EXISTS order_commands(seller_id TEXT NOT NULL,command_id TEXT NOT NULL,fingerprint TEXT NOT NULL,result TEXT NOT NULL,PRIMARY KEY(seller_id,command_id)) STRICT;
-    INSERT OR IGNORE INTO schema_migrations VALUES(3);`);
+    CREATE TABLE IF NOT EXISTS shipment_events(seller_id TEXT NOT NULL,order_id TEXT NOT NULL,event_id TEXT NOT NULL,payload TEXT NOT NULL CHECK(json_valid(payload)),PRIMARY KEY(seller_id,event_id)) STRICT;
+    INSERT OR IGNORE INTO schema_migrations VALUES(3);
+    INSERT OR IGNORE INTO schema_migrations VALUES(4);`);
   }
   private atomic<T>(run: () => T): T {
     this.db.exec('BEGIN IMMEDIATE');
@@ -95,11 +103,34 @@ export class Commerce {
   }
   private persist(seller: string, order: SavedOrder) {
     order = savedOrderSchema.parse(order);
-    this.db
-      .prepare(
-        'INSERT INTO managed_orders VALUES(?,?,?) ON CONFLICT(seller_id,id) DO UPDATE SET payload=excluded.payload',
-      )
-      .run(seller, order.order_id, JSON.stringify(order));
+    if (order.historical) {
+      const raw = this.db
+        .prepare(
+          "SELECT payload FROM records WHERE seller_id=? AND type='order' AND id=?",
+        )
+        .get(seller, order.order_id);
+      if (!raw)
+        throw new AppError('ORDER_NOT_FOUND', '주문을 찾을 수 없습니다.', 404);
+      const previous = orderSchema.parse(JSON.parse(String(raw.payload)));
+      const updated = orderSchema.parse({
+        ...previous,
+        status: order.status,
+        version: order.version,
+        carrier: order.carrier,
+        tracking_number: order.tracking_number,
+        shipped_at: order.shipped_at,
+      });
+      this.db
+        .prepare(
+          "UPDATE records SET payload=? WHERE seller_id=? AND type='order' AND id=?",
+        )
+        .run(JSON.stringify(updated), seller, order.order_id);
+    } else
+      this.db
+        .prepare(
+          'INSERT INTO managed_orders VALUES(?,?,?) ON CONFLICT(seller_id,id) DO UPDATE SET payload=excluded.payload',
+        )
+        .run(seller, order.order_id, JSON.stringify(order));
     this.bump(seller, 'order');
     return order;
   }
@@ -365,11 +396,140 @@ export class Commerce {
       return result;
     });
   }
+  shipmentHistory(seller: string, id: string) {
+    this.get(seller, id);
+    return this.db
+      .prepare(
+        'SELECT payload FROM shipment_events WHERE seller_id=? AND order_id=? ORDER BY rowid',
+      )
+      .all(seller, id)
+      .map((r) => shipmentEventSchema.parse(JSON.parse(String(r.payload))));
+  }
+  shipment(seller: string, id: string, raw: ShipmentCommand, now = new Date()) {
+    const input = shipmentCommandSchema.parse(raw);
+    return this.atomic(() => {
+      const fingerprint = createHash('sha256')
+        .update(JSON.stringify({ id, input }))
+        .digest('hex');
+      const cached = this.db
+        .prepare(
+          'SELECT fingerprint,result FROM order_commands WHERE seller_id=? AND command_id=?',
+        )
+        .get(seller, input.command_id);
+      if (cached) {
+        if (cached.fingerprint !== fingerprint)
+          throw new AppError(
+            'IDEMPOTENCY_CONFLICT',
+            '같은 요청 ID의 내용이 다릅니다.',
+            409,
+          );
+        return {
+          ...shipmentResultSchema.parse(JSON.parse(String(cached.result))),
+          replayed: true,
+        };
+      }
+      const order = this.get(seller, id);
+      if (input.operation === 'register_shipment' && order.status === 'shipped')
+        throw new AppError(
+          'SHIPMENT_ALREADY_RECORDED',
+          '이미 발송 기록이 있습니다. 정정 기능을 사용하세요.',
+          409,
+        );
+      if (
+        order.status !==
+        (input.operation === 'register_shipment' ? 'confirmed' : 'shipped')
+      )
+        throw new AppError(
+          'INVALID_ORDER_STATE',
+          '발송 등록은 확정 주문, 정정은 발송된 주문만 가능합니다.',
+          409,
+        );
+      if (order.version !== input.expected_version)
+        throw new AppError(
+          'STALE_VERSION',
+          '주문이 변경됐습니다. 최신 기록을 다시 확인하세요.',
+          409,
+        );
+      if (
+        !order.confirmed_at ||
+        !Number.isFinite(Date.parse(order.confirmed_at)) ||
+        Date.parse(input.shipped_at) < Date.parse(order.confirmed_at) ||
+        Date.parse(input.shipped_at) > now.getTime()
+      )
+        throw new AppError(
+          'INVALID_SHIPMENT_TIME',
+          '발송 시각은 확정 이후이며 현재 시각을 넘을 수 없습니다.',
+          422,
+        );
+      const before = {
+          carrier: order.carrier,
+          tracking_number: order.tracking_number,
+          shipped_at: order.shipped_at,
+        },
+        after = {
+          carrier: input.carrier,
+          tracking_number: input.tracking_number,
+          shipped_at: input.shipped_at,
+        };
+      if (
+        input.operation === 'update_shipment' &&
+        before.carrier?.trim() === after.carrier &&
+        before.tracking_number?.replace(/\s/g, '') === after.tracking_number &&
+        Date.parse(before.shipped_at ?? '') === Date.parse(after.shipped_at)
+      )
+        throw new AppError('NO_CHANGE', '정정할 내용을 변경하세요.', 422);
+      const saved = this.persist(seller, {
+        ...order,
+        ...after,
+        status: 'shipped',
+        version: order.version + 1,
+      });
+      const event = shipmentEventSchema.parse({
+        event_id: randomUUID(),
+        command_id: input.command_id,
+        order_id: id,
+        operation: input.operation,
+        version: saved.version,
+        actor: seller,
+        recorded_at: now.toISOString(),
+        correction_reason:
+          input.operation === 'update_shipment'
+            ? input.correction_reason
+            : null,
+        before,
+        after,
+      });
+      this.db
+        .prepare('INSERT INTO shipment_events VALUES(?,?,?,?)')
+        .run(seller, id, event.event_id, JSON.stringify(event));
+      const result = {
+        command_id: input.command_id,
+        order_id: id,
+        status: 'shipped' as const,
+        version: saved.version,
+        order: saved,
+        event,
+        replayed: false,
+      };
+      this.db
+        .prepare('INSERT INTO order_commands VALUES(?,?,?,?)')
+        .run(seller, input.command_id, fingerprint, JSON.stringify(result));
+      return result;
+    });
+  }
   remove(seller: string, id: string, version: number) {
     return this.atomic(() => {
       const order = this.get(seller, id);
       if (order.version !== version)
         throw new AppError('STALE_VERSION', '주문이 변경됐습니다.', 409);
+      this.db
+        .prepare('DELETE FROM shipment_events WHERE seller_id=? AND order_id=?')
+        .run(seller, id);
+      this.db
+        .prepare(
+          'UPDATE parcel_exports SET payload=NULL WHERE seller_id=? AND EXISTS(SELECT 1 FROM json_each(order_ids) WHERE value=?)',
+        )
+        .run(seller, id);
       this.db
         .prepare('DELETE FROM managed_orders WHERE seller_id=? AND id=?')
         .run(seller, id);
@@ -380,7 +540,7 @@ export class Commerce {
         .run(seller, id);
       this.db
         .prepare(
-          "DELETE FROM order_commands WHERE seller_id=? AND json_extract(result,'$.order_id')=?",
+          "DELETE FROM order_commands WHERE seller_id=? AND COALESCE(json_extract(result,'$.order_id'),json_extract(result,'$.order.order_id'))=?",
         )
         .run(seller, id);
       this.bump(seller, 'order');
@@ -390,6 +550,12 @@ export class Commerce {
     return this.atomic(() => {
       if (this.store.source(seller, 'order').snapshot_id !== snapshot)
         throw new AppError('STALE_VERSION', '주문 목록이 변경됐습니다.', 409);
+      this.db
+        .prepare('DELETE FROM shipment_events WHERE seller_id=?')
+        .run(seller);
+      this.db
+        .prepare('DELETE FROM parcel_exports WHERE seller_id=?')
+        .run(seller);
       this.db
         .prepare('DELETE FROM managed_orders WHERE seller_id=?')
         .run(seller);
@@ -423,9 +589,9 @@ export class Commerce {
           status: o.status,
           created_at: o.created_at,
           confirmed_at: o.confirmed_at,
-          carrier: null,
-          tracking_number: null,
-          shipped_at: null,
+          carrier: o.carrier,
+          tracking_number: o.tracking_number,
+          shipped_at: o.shipped_at,
           version: o.version,
         });
         return candidate.success ? [candidate.data] : [];
