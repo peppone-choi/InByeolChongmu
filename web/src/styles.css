@@ -2339,3 +2339,167 @@ h3 {
     max-width: 100%;
   }
 }
+
+.shipment-panel,
+.parcel-preview,
+.parcel-history {
+  border-top: 1px solid var(--color-rule);
+  padding-top: 20px;
+  margin-top: 20px;
+}
+.shipment-panel h3,
+.parcel-panel h2,
+.shipment-history summary {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.shipment-panel form {
+  margin-top: 18px;
+}
+.shipment-panel .form-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.shipment-panel form .data-actions {
+  margin-top: 0;
+}
+.shipment-summary {
+  display: grid;
+  grid-template-columns: 80px minmax(0, 1fr);
+  gap: 8px;
+  margin: 18px 0;
+  font-size: 13px;
+}
+.shipment-summary dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.shipment-history summary,
+.parcel-history summary {
+  cursor: pointer;
+  padding: 12px 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+.shipment-history article,
+.parcel-history article,
+.parcel-preview-rows article {
+  padding: 14px 0;
+  border-top: 1px solid var(--color-rule);
+  font-size: 13px;
+  line-height: 1.8;
+  overflow-wrap: anywhere;
+}
+.parcel-panel {
+  border-color: var(--color-rule);
+  margin-block: 20px;
+}
+.parcel-panel fieldset {
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+.parcel-panel form {
+  margin-block: 20px;
+}
+.parcel-column {
+  display: grid;
+  grid-template-columns: 100px minmax(120px, 1fr) 60px 30px 30px 90px;
+  gap: 8px;
+  align-items: end;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--color-rule);
+}
+.parcel-column strong {
+  font-size: 12px;
+  align-self: center;
+}
+.parcel-order-selection {
+  max-height: 320px;
+  overflow: auto;
+  margin-bottom: 16px;
+}
+.parcel-select-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(100px, 1fr);
+  gap: 16px;
+  padding: 12px 0;
+  border-top: 1px solid var(--color-rule);
+  align-items: center;
+}
+.parcel-select-row label {
+  overflow-wrap: anywhere;
+}
+.parcel-panel label.check-line {
+  display: flex;
+  flex-direction: row;
+  align-items: start;
+  gap: 8px;
+  font-weight: 400;
+}
+.parcel-panel .check-line input {
+  width: 17px;
+  flex: 0 0 17px;
+}
+.parcel-preview-rows {
+  max-height: 300px;
+  overflow: auto;
+}
+.repeat-warning {
+  background: var(--color-warning-bg);
+  padding: 16px;
+  border-radius: 8px;
+  margin: 16px 0;
+  line-height: 1.7;
+}
+@media (max-width: 850px) {
+  .parcel-column {
+    grid-template-columns: minmax(0, 1fr) 32px 32px;
+  }
+  .parcel-column > label:nth-of-type(1) {
+    grid-column: 1/-1;
+  }
+  .parcel-select-row {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+}
+@media (max-width: 600px) {
+  .shipment-panel .form-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .parcel-panel {
+    padding: 16px;
+  }
+  .parcel-panel > header {
+    flex-wrap: wrap;
+  }
+  .parcel-panel .data-actions > .button {
+    white-space: normal;
+  }
+  .shipment-summary {
+    grid-template-columns: 65px minmax(0, 1fr);
+  }
+}
+.parcel-row-fields {
+  margin: 0;
+}
+.parcel-row-fields > div {
+  display: grid;
+  grid-template-columns: 100px minmax(0, 1fr);
+  gap: 12px;
+  padding: 3px 0;
+}
+.parcel-row-fields dt {
+  color: var(--color-muted);
+}
+.parcel-row-fields dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 600px) {
+  .parcel-row-fields > div {
+    grid-template-columns: 80px minmax(0, 1fr);
+    gap: 8px;
+  }
+}

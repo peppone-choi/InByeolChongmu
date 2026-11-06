@@ -18,6 +18,12 @@ import {
   WorkbookImports,
   exportCurrentWorkbook,
 } from '../storage/data-workbook.js';
+import {
+  shipmentCommandSchema,
+  parcelTemplateSchema,
+  parcelSelectionSchema,
+  parcelCreateSchema,
+} from '../domain/shipping.js';
 import { roomDetail, roomSummary } from './room-view.js';
 import { bodyLimit } from 'hono/body-limit';
 import { z } from 'zod';
@@ -267,6 +273,76 @@ export function createApp(
       .parse(await parseJson(c.req.raw));
     store.commerce.remove(config.sellerId, c.req.param('id'), expected_version);
     return c.json({ orders: store.commerce.list(config.sellerId) });
+  });
+  app.get('/api/orders/:id/shipments', (c) =>
+    c.json({
+      events: store.commerce.shipmentHistory(
+        config.sellerId,
+        c.req.param('id'),
+      ),
+    }),
+  );
+  app.post('/api/orders/:id/shipments', async (c) =>
+    c.json(
+      store.commerce.shipment(
+        config.sellerId,
+        c.req.param('id'),
+        shipmentCommandSchema.parse(await parseJson(c.req.raw)),
+        options.clock?.(),
+      ),
+    ),
+  );
+  app.get('/api/parcel/template', (c) =>
+    c.json(store.parcels.template(config.sellerId)),
+  );
+  app.put('/api/parcel/template', async (c) => {
+    const input = z
+      .object({ version: z.string(), template: parcelTemplateSchema })
+      .strict()
+      .parse(await parseJson(c.req.raw));
+    return c.json(
+      store.parcels.saveTemplate(
+        config.sellerId,
+        input.version,
+        input.template,
+      ),
+    );
+  });
+  app.post('/api/parcel/preview', async (c) =>
+    c.json(
+      store.parcels.preview(
+        config.sellerId,
+        parcelSelectionSchema.parse(await parseJson(c.req.raw)),
+      ),
+    ),
+  );
+  app.post('/api/parcel/exports', async (c) =>
+    c.json(
+      store.parcels.create(
+        config.sellerId,
+        parcelCreateSchema.parse(await parseJson(c.req.raw)),
+        options.clock?.(),
+      ),
+      201,
+    ),
+  );
+  app.get('/api/parcel/exports', (c) =>
+    c.json({ exports: store.parcels.list(config.sellerId) }),
+  );
+  app.get('/api/parcel/exports/:id/file', async (c) => {
+    const bytes = await store.parcels.download(
+      config.sellerId,
+      c.req.param('id'),
+    );
+    c.header(
+      'Content-Type',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    );
+    c.header(
+      'Content-Disposition',
+      `attachment; filename="parcel-${c.req.param('id').replace(/[^a-zA-Z0-9-]/g, '')}.xlsx"`,
+    );
+    return c.body(new Uint8Array(bytes));
   });
   app.get('/api/data/stats', (c) => c.json(store.dataStats(config.sellerId)));
   app.get('/api/data/export', async (c) => {

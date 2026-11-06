@@ -134,7 +134,7 @@ export default function App() {
     [orderId, setOrderId] = useState<string | null>(null);
   useEffect(() => {
     void workspace.start();
-  }, []);
+  }, [workspace]);
   const [page, setPage] = useState<Page>('inbox'),
     [category, setCategory] = useState<Category>('all'),
     [search, setSearch] = useState(''),

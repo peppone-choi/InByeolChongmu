@@ -537,6 +537,16 @@ export async function exportCurrentWorkbook(store: Store, seller: string) {
     ]),
   );
   add(
+    'shipment_events',
+    ['event'],
+    data.shipment_events.map((e) => [e]),
+  );
+  add(
+    'parcel_exports',
+    ['export'],
+    data.parcel_exports.map((e) => [e]),
+  );
+  add(
     'metadata',
     ['key', 'value'],
     [

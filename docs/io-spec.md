@@ -1,6 +1,6 @@
 # 입력·출력 명세
 
-상태: 계약 `0.1` · 채팅/대화방/자료 API·실제 Flue 모델 분석·웹 검토/자료 수정 구현, 주문 후보 저장·승인·발송·내보내기 명령은 미구현. JSON 키는 코드용, 설명과 화면 문구는 한글입니다.
+상태: 계약 `0.1` · 채팅/대화방/자료 API·Flue 분석·웹 검토, 주문 저장/판매자 확정·재고, 발송/정정·이력과 공통 택배 명단/열 설정을 구현했습니다. 실제 HTTP 요청·응답은 [백엔드 사용법](backend.md)을 기준으로 합니다. JSON 키는 코드용, 설명과 화면 문구는 한글입니다.
 
 ## 1. 분석 입력
 
@@ -64,13 +64,13 @@
 
 현재 분석 예시는 품목별 SKU·상품 ID·수량·단가를 상품 스냅샷 및 DM 기대값과 대조한 뒤 금액을 검사합니다. 이미 저장된 과거 주문은 저장 당시 단가·할인·배송비로 산술만 검증하며 현재 정책을 다시 적용하지 않습니다. 과거 정책의 적합성까지 검증한 것은 아닙니다.
 
-주문 생성·수정은 분석과 별도인 `save_draft` 명령 제안입니다. 서버가 ID를 부여해 불완전한 후보는 `draft`, 필수값·정책 검증을 통과한 후보는 `pending_payment`로 저장합니다. 저장만으로 재고를 예약·차감하지 않습니다. 중복 고객·유사 주문을 표시하되 본문이 같다는 이유만으로 다른 실제 주문을 삭제하지 않습니다.
+주문 생성·수정은 분석과 별도인 주문 후보 저장 명령입니다. 실제 경로는 `POST /api/orders/from-analysis`와 `PUT /api/orders/:id`입니다. 서버가 ID를 부여해 불완전한 후보는 `draft`, 필수값·정책 검증을 통과한 후보는 `pending_payment`로 저장합니다. 저장만으로 재고를 예약·차감하지 않습니다. 중복 고객·유사 주문을 표시하되 본문이 같다는 이유만으로 다른 실제 주문을 삭제하지 않습니다.
 
 ## 4. 주문 확정 명령과 응답
 
 명령 필수값: `command_id`(멱등 키), `order_id`, `expected_version`, `reviewed_snapshots`, `payment_checked=true`, `checked_amount_krw`, `checked_depositor_name`, `address_acknowledged=true`. 승인자·확인 시각은 신뢰 가능한 서버 문맥에서 기록합니다. 주소 검색 API 성공을 필수 조건으로 강제하지 않지만 미검사 상태와 판매자 수령지 확인은 기록합니다.
 
-성공 응답: `{command_id, order_id, status:"confirmed", version, replayed:false}`. 동일 명령 재호출은 기존 결과와 `replayed:true`를 반환합니다. 별도 키로 이미 확정한 주문을 요청하면 기존 상태를 반환하고 다시 차감하지 않습니다.
+성공 응답: `{command_id, order_id, status:"confirmed", version, replayed:false}`. 현재 확정 API는 `{order}`를 반환하며 동일 명령 재호출도 저장된 주문을 반환합니다. 발송 명령은 아래처럼 `replayed`를 따로 제공합니다. 별도 키로 이미 확정한 주문을 요청하면 기존 상태를 반환하고 다시 차감하지 않습니다.
 
 실패 응답: `{command_id, status:"rejected", code, message, retryable}`. 금액·입금자명·확인 플래그·최신 버전·정책·재고를 재검사하고, 실패 시 일부 품목만 차감하지 않습니다. 저장소 트랜잭션 또는 동등한 원자적 보장이 필요합니다.
 
@@ -88,19 +88,19 @@
 
 내부 공통 행은 `order_id, recipient_name, phone, postal_code, address, item_summary, total_krw, shipping_memo`입니다. 한 주문당 한 행에 상품을 합치며, 실제 택배사 어댑터가 대상 열·자료형으로 변환합니다. 이 목록을 실제 택배 업로드 양식이라고 주장하지 않습니다.
 
-결과는 `export_id`, `template_version`, `included_order_ids`, `excluded[{order_id, reason}]`, 파일 정보입니다. 전화·우편번호는 문자열로 유지하고 고객 입력의 수식 실행을 막습니다. 파일 생성은 주문 발송이나 송장 발급을 뜻하지 않습니다. 실제 양식과 파일 형식 검증은 미완료입니다.
+결과는 `export_id`, `template_version`, `included_order_ids`, `excluded[{order_id, reason}]`, 파일 정보입니다. 전화·우편번호는 문자열로 유지하고 고객 입력의 수식 실행을 막습니다. 파일 생성은 주문 발송이나 송장 발급을 뜻하지 않습니다. 현재는 택배사 미정에 따라 공통 명단과 열 설정을 구현·검증했습니다. 실제 택배사 업로드 호환성은 미검증입니다. 파일은 확정·미발송 주문만 포함하고 미확정/취소/기발송/필수값 누락은 사유와 함께 제외합니다. 재내보내기는 이전 횟수·시각을 보여주고 중복 접수 위험을 확인합니다. 파일 생성과 발송 기록은 서로 다른 명령입니다.
 
 ## 7. 수동 발송·송장 등록 및 정정 계약
 
-주문·발송 서비스는 아직 미구현입니다. 첫 버전은 판매자가 기존 택배 프로그램에서 실제 발송을 확인한 뒤 직접 기록하는 방식으로 설계합니다. 택배사 API 발급·자동 동기화는 추가하지 않습니다. [SHIP-001 가상 명령과 기대 응답](samples/shipment-example.json)은 문서 계약 예시이며 주문 파일을 변경하지 않습니다.
+주문·발송 서비스를 구현했습니다. 판매자가 기존 택배 프로그램에서 실제 발송을 확인한 뒤 직접 기록합니다. 택배사 API 발급·자동 동기화는 추가하지 않습니다. [SHIP-001 가상 명령과 기대 응답](samples/shipment-example.json)은 문서 계약 예시이며 주문 파일을 변경하지 않습니다.
 
 ### 최초 등록: `register_shipment`
 
-입력은 `schema_version`, `operation`, `command_id`, `order_id`, `expected_version`, `carrier`, `tracking_number`, `shipped_at`입니다. 택배사·송장번호는 공백 제거 후 비어 있지 않은 문자열로 받고 송장 앞자리 0을 보존합니다. 발송 시각은 시간대 포함 시각이며 `confirmed_at ≤ shipped_at ≤ 서버 현재 시각`이어야 합니다. 송장 양식은 택배사별로 확인하며, 번호의 실제 존재나 배송 상태를 확인했다고 표시하지 않습니다.
+입력은 `schema_version`, `operation`, `command_id`, `order_id`, `expected_version`, `carrier`, `tracking_number`, `shipped_at`입니다. 택배사·송장번호는 공백 제거 후 비어 있지 않은 문자열로 받고 송장 앞자리 0을 보존합니다. 발송 시각은 시간대 포함 시각이며 `confirmed_at ≤ shipped_at ≤ 서버 현재 시각`이어야 합니다. 현재는 비어 있지 않은 최대 100자 문자열만 확인하며 택배사별 번호 규칙은 미검증입니다. 번호의 실제 존재나 배송 상태를 확인했다고 표시하지 않습니다.
 
 서버는 인증한 판매자의 주문인지 확인합니다. 최초 등록의 허용 상태는 `confirmed`이며 성공하면 송장 정보·발송일·감사 기록과 버전 증가를 원자적으로 저장해 `shipped`로 바꿉니다. `draft/pending_payment/cancelled`는 `INVALID_ORDER_STATE`, 이미 `shipped`인 주문의 새 등록 명령은 `SHIPMENT_ALREADY_RECORDED`로 거절합니다.
 
-성공 응답은 `{command_id, order_id, status:"shipped", version, replayed:false}`이며 버전은 기존 값 + 1입니다. 거절 응답은 `{command_id, status:"rejected", code, message, retryable}`입니다. 검증 실패·버전 충돌·저장 실패 시 일부 필드나 감사 기록만 반영하지 않습니다. 등록은 재고·금액·수령인·입금 상태를 변경하지 않습니다.
+성공 응답은 `{command_id, order_id, status:"shipped", version, replayed:false, order, event}`이며 버전은 기존 값 + 1입니다. 거절 응답은 `{command_id, status:"rejected", code, message, retryable}`입니다. 검증 실패·버전 충돌·저장 실패 시 일부 필드나 감사 기록만 반영하지 않습니다. 등록은 재고·금액·수령인·입금 상태를 변경하지 않습니다.
 
 ### 재시도·정정
 

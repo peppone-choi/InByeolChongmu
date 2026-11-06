@@ -13,6 +13,8 @@ import type {
   OrderEdit,
 } from '../../src/domain/commerce';
 import type { Resources } from '../../src/domain/http-contract';
+import { ShipmentPanel } from './ShipmentPanel';
+import { ParcelExportPanel } from './ParcelExportPanel';
 import { api, ApiError } from './api';
 import { money } from './data';
 const labels: Record<string, string> = {
@@ -41,7 +43,8 @@ export function Orders({
     [filter, setFilter] = useState('all'),
     [command, setCommand] = useState<ConfirmOrder | null>(null),
     [confirmedChecks, setConfirmedChecks] = useState(false),
-    [deleteTarget, setDeleteTarget] = useState<SavedOrder | null>(null);
+    [deleteTarget, setDeleteTarget] = useState<SavedOrder | null>(null),
+    [showParcel, setShowParcel] = useState(false);
   const order = orders.find((o) => o.order_id === selected);
   const load = async () => {
     const [rows, r] = await Promise.all([api.orders(), api.resources()]);
@@ -194,6 +197,16 @@ export function Orders({
           새로고침
         </button>
       </div>
+      <div className="data-actions">
+        <button
+          className="button"
+          disabled={busy}
+          onClick={() => setShowParcel((v) => !v)}
+        >
+          {showParcel ? '택배 엑셀 닫기' : '택배용 엑셀 내보내기'}
+        </button>
+      </div>
+      {showParcel && <ParcelExportPanel orders={orders} />}
       {error && (
         <p className="error-copy" role="alert">
           {error}
@@ -496,6 +509,22 @@ export function Orders({
                 )}
               </form>
             )}
+            {['confirmed', 'shipped'].includes(order.status) && (
+              <ShipmentPanel
+                key={order.order_id}
+                order={order}
+                busy={busy}
+                onBusy={setBusy}
+                onSaved={async (updated) => {
+                  setOrders((rows) =>
+                    rows.map((o) =>
+                      o.order_id === updated.order_id ? updated : o,
+                    ),
+                  );
+                  await load();
+                }}
+              />
+            )}
             {order.payment && (
               <p className="save-success">
                 {order.payment.checked_at} · 판매자 {order.payment.actor} 확인 ·{' '}
@@ -521,8 +550,9 @@ export function Orders({
           </p>
           <p>
             삭제 후 복구할 수 없습니다.{' '}
-            <strong>이미 차감된 재고는 복원하지 않습니다.</strong> 대화와
-            상품·정책은 유지합니다.
+            <strong>이미 차감된 재고는 복원하지 않습니다.</strong> 발송·정정
+            이력도 삭제하고, 이 주문이 포함된 택배 파일의 재다운로드를
+            중단합니다. 대화와 상품·정책은 유지합니다.
           </p>
           <button
             className="button"
