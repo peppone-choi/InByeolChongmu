@@ -450,11 +450,16 @@ export class Store {
     });
   }
   hasRunning(seller: string) {
-    return !!this.db
+    return this.db
       .prepare(
-        "SELECT 1 FROM agent_runs WHERE seller_id=? AND status='running'",
+        "SELECT json_extract(input,'$.expires_at') AS expires_at FROM agent_runs WHERE seller_id=? AND status='running'",
       )
-      .get(seller);
+      .all(seller)
+      .some((row) => {
+        const deadline = Date.parse(String(row.expires_at ?? ''));
+        // A crashed, expired run is no longer live. Unknown deadlines fail closed.
+        return !Number.isFinite(deadline) || deadline > Date.now();
+      });
   }
   resetChats(seller: string) {
     return this.transaction(() => {

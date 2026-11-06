@@ -597,3 +597,73 @@ test('browser API sends only catalog versions for draft edits and resource delet
     store.close();
   }
 });
+
+test('chat reset after restart clears expired work while live work remains protected', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'inbyeol-reset-expired-')),
+    file = join(dir, 'app.sqlite');
+  let store = setup(file);
+  const config = readConfig(process.cwd(), {
+    NODE_ENV: 'test',
+    DATABASE_PATH: file,
+    FLUE_DATABASE_PATH: ':memory:',
+    AGENT_BACKEND: 'disabled',
+    LOCAL_API_TOKEN: '',
+    OPENAI_API_KEY: '',
+    TYPESAFE_API_KEY: '',
+  });
+  const input = () => ({
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      confirm: '초기화',
+      snapshots: {
+        ...store.commerce.snapshots(seller),
+        orders: store.source(seller, 'order').snapshot_id,
+      },
+    }),
+  });
+  try {
+    store.receive(seller, {
+      requestId: 'crashed',
+      handle: '@sample.reset',
+      text: '가상 문의',
+      attachments: [],
+    });
+    store.beginRun(
+      seller,
+      'crashed',
+      { messages: 40, characters: 40000, timeoutMs: -1 },
+      now,
+    );
+    store.close();
+    store = new Store(file);
+    const app = createApp(store, config);
+    assert.equal(
+      (await app.request('/api/data/reset/chats', input())).status,
+      200,
+    );
+    assert.equal(store.conversations(seller).length, 0);
+    assert.equal(store.orders(seller).length, 6);
+    store.receive(seller, {
+      requestId: 'live',
+      handle: '@sample.live',
+      text: '진행 중인 가상 문의',
+      attachments: [],
+    });
+    const active = store.beginRun(
+      seller,
+      'live',
+      { messages: 40, characters: 40000, timeoutMs: 60000 },
+      now,
+    );
+    assert.equal(
+      (await app.request('/api/data/reset/chats', input())).status,
+      409,
+    );
+    assert.equal(store.conversations(seller).length, 1);
+    store.finishRun(active.id, emptyAnalysis('live'), 503);
+  } finally {
+    store.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
