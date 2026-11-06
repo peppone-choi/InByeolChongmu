@@ -28,6 +28,7 @@ export const productSchema = z
 export const policySchema = z
   .object({
     policy_id: id,
+    title: id.optional(),
     rule: z.string().min(1).max(10000),
     shipping_fee_krw: money.optional(),
     product_id: id.optional(),

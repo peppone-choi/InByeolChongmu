@@ -2,7 +2,15 @@ import { init, instrument } from '@flue/runtime';
 import { start, sqlite, type Flue } from '@flue/runtime/node';
 import type { Provider } from '@earendil-works/pi-ai';
 import { openaiProvider } from '@earendil-works/pi-ai/providers/openai';
-import { mkdirSync, chmodSync } from 'node:fs';
+import {
+  mkdirSync,
+  chmodSync,
+  existsSync,
+  realpathSync,
+  lstatSync,
+  rmSync,
+} from 'node:fs';
+import { DatabaseSync } from 'node:sqlite';
 import { dirname, resolve } from 'node:path';
 import type { Config } from '../config.js';
 import { providerEnvironment } from '../config.js';
@@ -216,6 +224,47 @@ export class FlueRunner implements AgentRunner {
     } finally {
       clearTimeout(timer);
     }
+  }
+  async resetHistory() {
+    if (this.active.size)
+      throw new AppError('AGENT_BUSY', '분석이 끝난 뒤 초기화하세요.', 409);
+    await this.stop();
+    const file = this.config.flueDatabasePath;
+    if (file === ':memory:' || !existsSync(file)) return;
+    if (
+      lstatSync(file).isSymbolicLink() ||
+      (this.store.path !== ':memory:' &&
+        realpathSync(file) === realpathSync(this.store.path))
+    )
+      throw new AppError(
+        'INVALID_RUNTIME_DATABASE',
+        '분리된 Flue DB만 초기화할 수 있습니다.',
+        409,
+      );
+    const db = new DatabaseSync(file, { readOnly: true });
+    try {
+      const names = db
+        .prepare(
+          "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'",
+        )
+        .all()
+        .map((r) => String(r.name));
+      if (
+        !names.includes('flue_meta') ||
+        names.some((n) => !n.startsWith('flue_'))
+      )
+        throw new AppError(
+          'INVALID_RUNTIME_DATABASE',
+          '전용 Flue 저장소인지 확인할 수 없습니다.',
+          409,
+        );
+    } finally {
+      db.close();
+    }
+    rmSync(file);
+    rmSync(file + '-wal', { force: true });
+    rmSync(file + '-shm', { force: true });
+    this.countedTurns.clear();
   }
   async stop() {
     await Promise.allSettled([...this.active.values()]);

@@ -1,0 +1,9 @@
+{
+  "date": "2026-11-05",
+  "framework": "React + Vite draft alongside Hono backend",
+  "existingDesignSystem": false,
+  "motion": "cut except press feedback and dialog entrance",
+  "audience": "1인 셀러",
+  "use": "DM 원문 대조와 답장 검토·복사",
+  "tone": "차분하고 선명한 업무 도구"
+}

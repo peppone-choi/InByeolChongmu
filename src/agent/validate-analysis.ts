@@ -10,10 +10,10 @@ import type { AgentRun } from './types.js';
 
 const object = (value: unknown) =>
   z.record(z.string(), z.unknown()).parse(value);
-function mismatch(): never {
+function mismatch(reason?: string): never {
   throw new AppError(
     'OUTPUT_MISMATCH',
-    '조회 근거·계산·고객 범위와 분석 결과가 일치하지 않습니다.',
+    reason ?? '조회 근거·계산·고객 범위와 분석 결과가 일치하지 않습니다.',
     503,
   );
 }
@@ -89,13 +89,17 @@ export function validateAnalysis(
     analysis.order_candidates.some((id) => !ids.order.has(id)) ||
     analysis.matched_skus.some((sku) => !skus.has(sku))
   )
-    mismatch();
+    mismatch(
+      '후보에는 실제 조회한 product_id·order_id·sku만 사용하세요. 상품명이나 도구명은 ID가 아닙니다.',
+    );
   for (const evidence of analysis.evidence)
     if (
       !ids[evidence.source_type].has(evidence.source_id) ||
       evidence.snapshot_id !== snapshots[evidence.source_type]
     )
-      mismatch();
+      mismatch(
+        'evidence에는 실제 조회한 자료 ID와 snapshot_id를 사용하세요. quote_order 같은 도구명은 source_id가 아닙니다. 필요한 정책은 get_policies로 조회하세요.',
+      );
   if (analysis.order_draft) {
     const draft = analysis.order_draft;
     if (
@@ -241,5 +245,8 @@ export function validateAnalysis(
     analysis.evidence.length === 0
   )
     mismatch();
+  // Tool arguments can double-escape line breaks; copyable text needs real lines.
+  if (analysis.reply_draft)
+    analysis.reply_draft = analysis.reply_draft.replace(/\\r\\n|\\n/g, '\n');
   return analysis;
 }

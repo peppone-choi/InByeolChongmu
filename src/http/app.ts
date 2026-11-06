@@ -1,5 +1,24 @@
-import { timingSafeEqual } from 'node:crypto';
 import { Hono } from 'hono';
+import { getCookie, setCookie, deleteCookie } from 'hono/cookie';
+import { serveStatic } from '@hono/node-server/serve-static';
+import { existsSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { BrowserSessions, sessionCookie, sessionTtl } from './session.js';
+import {
+  productUpdateSchema,
+  policyUpdateSchema,
+} from '../domain/http-contract.js';
+import {
+  saveOrderSchema,
+  updateOrderSchema,
+  confirmOrderSchema,
+  reviewedSchema,
+} from '../domain/commerce.js';
+import {
+  WorkbookImports,
+  exportCurrentWorkbook,
+} from '../storage/data-workbook.js';
+import { roomDetail, roomSummary } from './room-view.js';
 import { bodyLimit } from 'hono/body-limit';
 import { z } from 'zod';
 import type { Config } from '../config.js';
@@ -8,6 +27,9 @@ import type { AgentRunner } from '../agent/types.js';
 import { ChatService } from '../agent/service.js';
 import { Store } from '../storage/store.js';
 import { Tools, toolCatalog } from '../tools/registry.js';
+const resourcesSchemaForReset = reviewedSchema
+  .extend({ orders: z.string() })
+  .strict();
 export function createApp(
   store: Store,
   config: Config,
@@ -18,7 +40,15 @@ export function createApp(
   } = {},
 ) {
   const app = new Hono();
+  const sessions = new BrowserSessions(config.apiToken);
+  const authenticated = (request: Request, cookie: string | undefined) =>
+    sessions.authenticate(
+      request.headers.get('Authorization') ?? undefined,
+      cookie,
+    );
   const chat = new ChatService(store, config, options.runner, options.clock);
+  const imports = new WorkbookImports(store);
+  let maintenance = false;
   let windowStart = Date.now(),
     requests = 0;
   app.use('*', async (c, next) => {
@@ -41,15 +71,13 @@ export function createApp(
         '다른 출처의 요청은 허용하지 않습니다.',
         403,
       );
-    if (config.apiToken) {
-      const expected = Buffer.from('Bearer ' + config.apiToken),
-        provided = Buffer.from(c.req.header('Authorization') ?? '');
-      if (
-        expected.length !== provided.length ||
-        !timingSafeEqual(expected, provided)
-      )
-        throw new AppError('UNAUTHORIZED', '인증이 필요합니다.', 401);
-    }
+    const path = c.req.path;
+    if (
+      (path.startsWith('/api/') || path === '/health') &&
+      path !== '/api/session' &&
+      !authenticated(c.req.raw, getCookie(c, sessionCookie))
+    )
+      throw new AppError('UNAUTHORIZED', '연결 인증이 필요합니다.', 401);
     if (Date.now() - windowStart >= 60000) {
       windowStart = Date.now();
       requests = 0;
@@ -61,24 +89,32 @@ export function createApp(
         429,
         true,
       );
+    if (maintenance && c.req.method !== 'GET')
+      throw new AppError(
+        'MAINTENANCE',
+        '초기화 중입니다. 잠시 뒤 다시 시도하세요.',
+        409,
+      );
     await next();
   });
-  app.use(
-    '/api/*',
+  app.use('/api/*', async (c, next) =>
     bodyLimit({
-      maxSize: 65536,
+      maxSize:
+        c.req.path === '/api/data/import/preview' ? 2 * 1024 * 1024 : 65536,
       onError: () => {
         throw new AppError(
           'BODY_TOO_LARGE',
-          '요청 본문은 최대 64 KiB입니다.',
+          '일반 요청은 최대 64 KiB, 엑셀 파일은 최대 2 MiB입니다.',
           413,
         );
       },
-    }),
+    })(c, next),
   );
   app.use('/api/*', async (c, next) => {
     if (
-      c.req.method === 'POST' &&
+      c.req.path !== '/api/data/import/preview' &&
+      ['POST', 'PUT', 'DELETE'].includes(c.req.method) &&
+      c.req.path !== '/api/session' &&
       !/^application\/json(?:\s*;|$)/i.test(c.req.header('Content-Type') ?? '')
     )
       throw new AppError(
@@ -88,6 +124,39 @@ export function createApp(
       );
     await next();
   });
+  app.get('/api/session', (c) =>
+    c.json({
+      authenticated:
+        authenticated(c.req.raw, getCookie(c, sessionCookie)) !== null,
+      authentication_required: !!config.apiToken,
+      method: authenticated(c.req.raw, getCookie(c, sessionCookie)),
+    }),
+  );
+  app.post('/api/session', async (c) => {
+    const { token } = z
+      .object({ token: z.string().min(1).max(1024) })
+      .strict()
+      .parse(await parseJson(c.req.raw));
+    if (!sessions.verifyToken(token))
+      throw new AppError('UNAUTHORIZED', '연결 암호가 맞지 않습니다.', 401);
+    setCookie(c, sessionCookie, sessions.create(), {
+      httpOnly: true,
+      sameSite: 'Strict',
+      secure: new URL(c.req.url).protocol === 'https:',
+      path: '/',
+      maxAge: sessionTtl,
+    });
+    return c.json({
+      authenticated: true,
+      authentication_required: true,
+      method: 'session',
+    });
+  });
+  app.delete('/api/session', (c) => {
+    sessions.delete(getCookie(c, sessionCookie));
+    deleteCookie(c, sessionCookie, { path: '/' });
+    return c.body(null, 204);
+  });
   app.get('/health', (c) =>
     c.json({
       status: 'data_ready',
@@ -95,8 +164,185 @@ export function createApp(
       model_status: chat.runner.readiness().code,
       agent_backend: config.agentBackend,
       sqlite: true,
+      agent_model: config.agentModel,
+      typesafe_configured: config.credentials.jev,
+      agent_timeout_ms: config.agentTimeoutMs,
     }),
   );
+  const resources = () => ({
+    products: store.products(config.sellerId),
+    policies: store.policies(config.sellerId),
+    snapshots: {
+      products: store.source(config.sellerId, 'product').snapshot_id,
+      policies: store.source(config.sellerId, 'policy').snapshot_id,
+      orders: store.source(config.sellerId, 'order').snapshot_id,
+    },
+  });
+  app.get('/api/resources', (c) => c.json(resources()));
+  app.put('/api/resources/products/:id', async (c) => {
+    const input = productUpdateSchema.parse(await parseJson(c.req.raw));
+    store.updateProduct(
+      config.sellerId,
+      c.req.param('id'),
+      input.snapshot_id,
+      input.product,
+    );
+    return c.json(resources());
+  });
+  app.put('/api/resources/policies/:id', async (c) => {
+    const input = policyUpdateSchema.parse(await parseJson(c.req.raw));
+    store.updatePolicy(
+      config.sellerId,
+      c.req.param('id'),
+      input.snapshot_id,
+      input.policy,
+    );
+    return c.json(resources());
+  });
+  app.post('/api/resources/products', async (c) => {
+    const input = productUpdateSchema.parse(await parseJson(c.req.raw));
+    store.createProduct(config.sellerId, input.snapshot_id, input.product);
+    return c.json(resources(), 201);
+  });
+  app.post('/api/resources/policies', async (c) => {
+    const input = policyUpdateSchema.parse(await parseJson(c.req.raw));
+    store.createPolicy(config.sellerId, input.snapshot_id, input.policy);
+    return c.json(resources(), 201);
+  });
+  app.delete('/api/resources/:kind/:id', async (c) => {
+    const kind = z.enum(['products', 'policies']).parse(c.req.param('kind'));
+    const snapshots = reviewedSchema.parse(await parseJson(c.req.raw));
+    store.deleteResource(
+      config.sellerId,
+      kind === 'products' ? 'product' : 'policy',
+      c.req.param('id'),
+      snapshots,
+    );
+    return c.json(resources());
+  });
+  app.get('/api/orders', (c) =>
+    c.json({ orders: store.commerce.list(config.sellerId) }),
+  );
+  app.post('/api/orders/from-analysis', async (c) => {
+    const input = saveOrderSchema.parse(await parseJson(c.req.raw));
+    return c.json(
+      {
+        order: store.commerce.saveAnalysis(
+          config.sellerId,
+          input.request_id,
+          options.clock?.(),
+        ),
+      },
+      201,
+    );
+  });
+  app.put('/api/orders/:id', async (c) => {
+    const input = updateOrderSchema.parse(await parseJson(c.req.raw));
+    return c.json({
+      order: store.commerce.update(
+        config.sellerId,
+        c.req.param('id'),
+        input.expected_version,
+        input.reviewed_snapshots,
+        input.draft,
+        options.clock?.(),
+      ),
+    });
+  });
+  app.post('/api/orders/:id/confirm', async (c) => {
+    const input = confirmOrderSchema.parse(await parseJson(c.req.raw));
+    return c.json({
+      order: store.commerce.confirm(
+        config.sellerId,
+        c.req.param('id'),
+        input,
+        options.clock?.(),
+      ),
+    });
+  });
+  app.delete('/api/orders/:id', async (c) => {
+    const { expected_version } = z
+      .object({ expected_version: z.number().int().positive() })
+      .strict()
+      .parse(await parseJson(c.req.raw));
+    store.commerce.remove(config.sellerId, c.req.param('id'), expected_version);
+    return c.json({ orders: store.commerce.list(config.sellerId) });
+  });
+  app.get('/api/data/stats', (c) => c.json(store.dataStats(config.sellerId)));
+  app.get('/api/data/export', async (c) => {
+    const format = z
+      .enum(['json', 'xlsx'])
+      .parse(c.req.query('format') ?? 'xlsx');
+    c.header(
+      'Content-Disposition',
+      `attachment; filename="inbyeol-data.${format}"`,
+    );
+    if (format === 'json') return c.json(store.exportCurrent(config.sellerId));
+    c.header(
+      'Content-Type',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    );
+    return c.body(
+      new Uint8Array(await exportCurrentWorkbook(store, config.sellerId)),
+    );
+  });
+  app.post('/api/data/import/preview', async (c) => {
+    if (
+      !/^application\/vnd.openxmlformats-officedocument.spreadsheetml.sheet(?:;|$)/i.test(
+        c.req.header('Content-Type') ?? '',
+      )
+    )
+      throw new AppError('XLSX_REQUIRED', '.xlsx 파일을 선택하세요.', 415);
+    return c.json(
+      await imports.preview(
+        config.sellerId,
+        Buffer.from(await c.req.arrayBuffer()),
+      ),
+    );
+  });
+  app.post('/api/data/import/apply', async (c) => {
+    const { token } = z
+      .object({ token: z.uuid() })
+      .strict()
+      .parse(await parseJson(c.req.raw));
+    imports.apply(config.sellerId, token);
+    return c.json(resources());
+  });
+  app.post('/api/data/reset/:scope', async (c) => {
+    const scope = z
+      .enum(['catalog', 'orders', 'chats'])
+      .parse(c.req.param('scope'));
+    const input = z
+      .object({
+        confirm: z.literal('초기화'),
+        snapshots: resourcesSchemaForReset,
+      })
+      .strict()
+      .parse(await parseJson(c.req.raw));
+    if (store.hasRunning(config.sellerId))
+      throw new AppError('AGENT_BUSY', '분석이 끝난 뒤 초기화하세요.', 409);
+    if (scope === 'catalog')
+      store.resetCatalog(config.sellerId, input.snapshots);
+    if (scope === 'orders')
+      store.commerce.reset(config.sellerId, input.snapshots.orders);
+    if (scope === 'chats') {
+      if (!chat.runner.resetHistory)
+        throw new AppError(
+          'RESET_UNAVAILABLE',
+          '실행기의 기록 초기화가 지원되지 않습니다.',
+          503,
+        );
+      maintenance = true;
+      try {
+        await chat.runner.resetHistory();
+        store.resetChats(config.sellerId);
+      } finally {
+        maintenance = false;
+      }
+    }
+    imports.clear();
+    return c.json({ ok: true, resources: resources() });
+  });
   app.get('/api/tools', (c) => c.json({ tools: toolCatalog() }));
   app.post('/api/tools/:name', async (c) => {
     const envelope = z
@@ -144,9 +390,14 @@ export function createApp(
     if (handle && handle.length > 100)
       throw new AppError('INVALID_INPUT', '고객 아이디가 너무 깁니다.');
     return c.json({
-      conversations: store.conversations(config.sellerId, handle),
+      conversations: store
+        .conversations(config.sellerId, handle)
+        .map((room) => roomSummary(store, config.sellerId, room.id)),
     });
   });
+  app.get('/api/conversations/:id', (c) =>
+    c.json(roomDetail(store, config.sellerId, c.req.param('id'))),
+  );
   app.get('/api/conversations/:id/messages', (c) =>
     c.json({ messages: store.messages(config.sellerId, c.req.param('id')) }),
   );
@@ -154,6 +405,28 @@ export function createApp(
     const result = await chat.receive(await parseJson(c.req.raw));
     return c.json(result.body, result.httpStatus);
   });
+  const webRoot = resolve(config.root, 'dist/web');
+  if (existsSync(resolve(webRoot, 'index.html'))) {
+    app.use('/assets/*', async (c, next) => {
+      c.header(
+        'Content-Security-Policy',
+        "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; frame-ancestors 'none'",
+      );
+      await next();
+    });
+    app.get('/assets/*', serveStatic({ root: webRoot }));
+    app.get('/', async (c) => {
+      c.header(
+        'Content-Security-Policy',
+        "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; frame-ancestors 'none'",
+      );
+      c.header('Referrer-Policy', 'no-referrer');
+      return serveStatic({ root: webRoot, path: 'index.html' })(
+        c,
+        async () => {},
+      );
+    });
+  }
   app.notFound((c) =>
     c.json(
       {

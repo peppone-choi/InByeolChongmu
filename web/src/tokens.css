@@ -1,0 +1,52 @@
+/* Hallmark · pre-emit critique: P4 H5 E4 S5 R5 V4
+ * macrostructure: Workbench (application adaptation, no marketing hero)
+ * theme: Cobalt · nav: N3 application side-rail · footer: Ft2 inline
+ * audience: solo Instagram sellers · use: review and copy DM replies
+ * tone: calm, precise utility · motion: press feedback, dialog entrance
+ */
+:root {
+  --color-paper: oklch(98% 0.003 250);
+  --color-surface: oklch(99.6% 0.001 250);
+  --color-sidebar: oklch(97.2% 0.004 250);
+  --color-hover: oklch(95.4% 0.006 250);
+  --color-ink: oklch(24% 0.016 258);
+  --color-ink-2: oklch(37% 0.014 258);
+  --color-muted: oklch(47% 0.015 258);
+  --color-rule: oklch(90% 0.006 250);
+  --color-input-rule: oklch(64% 0.012 250);
+  --color-accent: oklch(48% 0.19 260);
+  --color-accent-hover: oklch(42% 0.18 260);
+  --color-accent-soft: oklch(95.5% 0.022 260);
+  --color-accent-ink: oklch(99.5% 0.001 250);
+  --color-warning: oklch(40% 0.095 65);
+  --color-warning-bg: oklch(97% 0.025 82);
+  --color-danger: oklch(43% 0.14 25);
+  --color-danger-bg: oklch(97% 0.015 25);
+  --color-success: oklch(37% 0.075 160);
+  --color-success-bg: oklch(96% 0.017 160);
+  --color-overlay: oklch(22% 0.015 258 / 0.35);
+  --color-clear: transparent;
+  --font-body:
+    'Pretendard', 'Apple SD Gothic Neo', 'Noto Sans KR', system-ui, sans-serif;
+  --font-display: 'Avenir Next', var(--font-body);
+  --font-mono: 'SFMono-Regular', Consolas, monospace;
+  --space-2xs: 4px;
+  --space-xs: 8px;
+  --space-sm: 12px;
+  --space-md: 16px;
+  --space-lg: 24px;
+  --space-xl: 32px;
+  --space-2xl: 40px;
+  --space-3xl: 64px;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-full: 999px;
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in: cubic-bezier(0.7, 0, 0.84, 0);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --dur-micro: 120ms;
+  --dur-short: 220ms;
+  --z-sticky: 20;
+  --z-modal: 40;
+}

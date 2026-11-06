@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { z } from 'zod';
 import { test } from 'node:test';
-import { readFileSync, mkdtempSync, rmSync } from 'node:fs';
+import { readFileSync, mkdtempSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -23,6 +23,7 @@ const post = (body: unknown) => ({
 });
 
 test('actual Flue loop reads room history, executes real tools, validates and replays without another model turn', async () => {
+  const runtimeDir = mkdtempSync(join(tmpdir(), 'inbyeol-flue-reset-'));
   const store = new Store(':memory:');
   store.seedSamples(root, seller);
   const room = store.createConversation(seller, '@sample.hana', '니트 주문');
@@ -44,7 +45,7 @@ test('actual Flue loop reads room history, executes real tools, validates and re
   const config = readConfig(root, {
     NODE_ENV: 'test',
     DATABASE_PATH: ':memory:',
-    FLUE_DATABASE_PATH: ':memory:',
+    FLUE_DATABASE_PATH: join(runtimeDir, 'runtime.sqlite'),
     AGENT_BACKEND: 'flue',
     AGENT_MODEL: 'faux/test',
     LOCAL_API_TOKEN: '',
@@ -130,9 +131,24 @@ test('actual Flue loop reads room history, executes real tools, validates and re
         .length,
       1,
     );
+    const reset = await app.request(
+      '/api/data/reset/chats',
+      post({
+        confirm: '초기화',
+        snapshots: {
+          ...store.commerce.snapshots(seller),
+          orders: store.source(seller, 'order').snapshot_id,
+        },
+      }),
+    );
+    assert.equal(reset.status, 200, JSON.stringify(await reset.json()));
+    assert.equal(store.conversations(seller).length, 0);
+    assert.equal(existsSync(config.flueDatabasePath), false);
+    assert.ok(store.products(seller).length);
   } finally {
     await runner.stop();
     store.close();
+    rmSync(runtimeDir, { recursive: true, force: true });
   }
 });
 

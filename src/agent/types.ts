@@ -34,4 +34,5 @@ export interface AgentRunner {
   readiness(): { ready: boolean; code: string | null };
   run(run: AgentRun): Promise<Analysis>;
   stop(): Promise<void>;
+  resetHistory?(): Promise<void>;
 }

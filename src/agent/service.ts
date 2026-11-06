@@ -5,6 +5,7 @@ import type { Config } from '../config.js';
 import type { Store } from '../storage/store.js';
 import type { AgentRunner, AgentRun } from './types.js';
 import { FlueRunner } from './flue-runner.js';
+import { executionView } from './run-view.js';
 export class ChatService {
   readonly runner: AgentRunner;
   constructor(
@@ -30,14 +31,7 @@ export class ChatService {
         analysis,
         ...(run
           ? {
-              execution: {
-                run_id: run.id,
-                runtime: 'flue',
-                model_calls: run.model_calls,
-                tool_calls: this.store
-                  .traces(run.id)
-                  .map((t) => ({ name: t.name, success: t.success })),
-              },
+              execution: executionView(this.store, run),
             }
           : {}),
       },

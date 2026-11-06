@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { relative, resolve, isAbsolute } from 'node:path';
 import { z } from 'zod';
 import { AppError } from '../domain/errors.js';
-import { Store } from '../storage/store.js';
+import type { Store } from '../storage/store.js';
 
 const query = z.string().trim().min(1).max(200);
 const itemsSchema = z
@@ -44,7 +44,7 @@ const descriptions: Record<ToolName, string> = {
   get_sales_calendar:
     '조회 전용: 자료에 명시된 공구 마감·출고 예정일을 기간으로 조회합니다. 외부 캘린더가 아닙니다.',
   read_document:
-    '조회 전용: 허용된 가상 판매 문서만 읽습니다. 임의 파일 경로를 받지 않습니다.',
+    '조회 전용: 허용된 참고 문서만 읽습니다. 현재 정책 사실은 get_policies로 조회하세요. 임의 파일 경로를 받지 않습니다.',
   quote_order:
     '코드 계산: 실제 상품 가격·할인·배송비로 합계를 구합니다. 확정·재고 변경은 하지 않습니다.',
 };
@@ -206,7 +206,11 @@ export class Tools {
       document_id: 'policy-guide',
       version: createHash('sha256').update(content).digest('hex'),
       synthetic: true,
-      authority: 'sample_policy',
+      authority: 'reference_only',
+      notice:
+        '이 문서는 초기 참고 예시입니다. 현재 판매 정책·금액·일정은 get_policies의 SQLite 자료를 조회하세요. 예시 문구로 현재 정책을 덮어쓰지 마세요.',
+      policy_snapshot_id: this.store.source(this.sellerId, 'policy')
+        .snapshot_id,
       content,
     };
   }
@@ -249,7 +253,7 @@ export class Tools {
               : 'INSUFFICIENT_STOCK',
           sku,
         });
-      if (Date.parse(match.p.closes_at) < this.clock().getTime())
+      if (Date.parse(match.p.closes_at) <= this.clock().getTime())
         review.push({ code: 'SALE_CLOSED', sku });
       return {
         product_id: match.p.product_id,
