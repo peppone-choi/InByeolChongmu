@@ -98,6 +98,13 @@ export class Workspace {
     this.patch({ resources });
     return resources;
   }
+  async reloadRooms() {
+    try {
+      this.patch({ rooms: await this.transport.rooms() });
+    } catch (error) {
+      this.patch({ error: this.error(error) });
+    }
+  }
   acceptResources(resources: Resources) {
     this.patch({ resources });
   }

@@ -13,7 +13,7 @@ import { Store } from '../src/storage/store.js';
 import { readConfig } from '../src/config.js';
 import { FlueRunner } from '../src/agent/flue-runner.js';
 import { createApp } from '../src/http/app.js';
-import type { Analysis } from '../src/domain/schema.js';
+import { emptyAnalysis, type Analysis } from '../src/domain/schema.js';
 const root = process.cwd(),
   seller = 'sample-seller-01';
 const post = (body: unknown) => ({
@@ -197,6 +197,7 @@ test('Flue rejects unproven output, stops at model budget and replays failure wi
     assert.equal(data.analysis.reply_draft, null);
     assert.equal(faux.state.callCount, 2);
     assert.equal(data.execution.model_calls, 2);
+    assert.equal(data.analysis.review_items[0].code, 'MODEL_CALL_LIMIT');
     assert.equal(
       store
         .messages(seller, data.conversation_id)
@@ -322,5 +323,103 @@ test('adversarial: SQLite resume cannot reset an expired run deadline', async ()
     await runner.stop();
     store.close();
     rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('AC-12 DM-009: Flue submits review-only candidates and cannot open a different customer order', async () => {
+  const store = new Store(':memory:');
+  const config = readConfig(root, {
+    NODE_ENV: 'test',
+    APP_DEPLOYMENT: 'local',
+    DATABASE_PATH: ':memory:',
+    FLUE_DATABASE_PATH: ':memory:',
+    AGENT_BACKEND: 'flue',
+    AGENT_MODEL: 'faux/test',
+    LOCAL_API_TOKEN: '',
+    OPENAI_API_KEY: '',
+    TYPESAFE_API_KEY: '',
+    AGENT_TIMEOUT_MS: '10000',
+  });
+  store.seedSamples(root, config.sellerId);
+  const faux = fauxProvider({ provider: 'faux', models: [{ id: 'test' }] });
+  const analysis: Analysis = {
+    ...emptyAnalysis('dm-009-review'),
+    classification: 'order_lookup',
+    status: 'human_review',
+    order_candidates: ['O-0002', 'O-0003'],
+    review_items: [
+      { code: 'ORDER_AMBIGUOUS', message: '판매자가 고객을 확인해 주세요.' },
+    ],
+  };
+  const submit = (value: Analysis) =>
+    fauxAssistantMessage(
+      fauxToolCall('submit_analysis', { analysis: z.json().parse(value) }),
+      { stopReason: 'toolUse' },
+    );
+  faux.setResponses([
+    fauxAssistantMessage(
+      [
+        fauxToolCall('search_orders', { arguments: { query: '샘플동명' } }),
+        fauxToolCall('search_orders', { arguments: { query: 'O-0002' } }),
+        fauxToolCall('search_orders', { arguments: { query: '샘플민지' } }),
+      ],
+      { stopReason: 'toolUse' },
+    ),
+    submit({
+      ...analysis,
+      reply_draft: '다른 계정의 주문입니다.',
+      evidence: [
+        {
+          source_type: 'order',
+          source_id: 'O-0002',
+          snapshot_id: 'orders-v1',
+          field_paths: ['status'],
+        },
+      ],
+    }),
+    submit({
+      ...analysis,
+      evidence: [
+        {
+          source_type: 'order',
+          source_id: 'O-0002',
+          snapshot_id: 'orders-v1',
+          field_paths: ['status'],
+        },
+      ],
+    }),
+    submit(analysis),
+  ]);
+  const runner = new FlueRunner(store, config, { providers: [faux.provider] });
+  const app = createApp(store, config, { runner });
+  try {
+    const response = await app.request(
+      '/api/chat',
+      post({
+        schema_version: '0.1',
+        request_id: analysis.request_id,
+        customer_handle: '@sample.unmatched',
+        text: '저 샘플동명인데요. 다른 계정으로 주문했나 봐요. 발송됐나요?',
+        attachments: [],
+      }),
+    );
+    const body = await response.json();
+    assert.equal(response.status, 200);
+    assert.deepEqual(body.analysis, analysis);
+    const traces = store.traces(body.execution.run_id);
+    const lookup = traces.filter((trace) => trace.name === 'search_orders');
+    assert.deepEqual(
+      lookup.map((trace) => (trace.result as { records: unknown }).records),
+      [[{ order_id: 'O-0002' }, { order_id: 'O-0003' }], [], []],
+    );
+    assert.deepEqual(
+      traces
+        .filter((trace) => trace.name === 'submit_analysis')
+        .map((trace) => trace.success),
+      [false, false, true],
+    );
+  } finally {
+    await runner.stop();
+    store.close();
   }
 });

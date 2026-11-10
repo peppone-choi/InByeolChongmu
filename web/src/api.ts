@@ -30,6 +30,11 @@ import {
 } from '../../src/domain/http-contract.js';
 import type { Product, Policy } from '../../src/domain/schema.js';
 import type { ChatRequest } from '../../src/domain/schema.js';
+import {
+  batchListSchema,
+  batchViewSchema,
+  type CreateBatch,
+} from '../../src/domain/batch.js';
 export class ApiError extends Error {
   constructor(
     message: string,
@@ -85,6 +90,23 @@ async function request<T>(
   );
 }
 export const api = {
+  batches: () => request('/api/dm-batches', batchListSchema),
+  batch: (id: string) => request(`/api/dm-batches/${id}`, batchViewSchema),
+  createBatch: (body: CreateBatch) =>
+    request('/api/dm-batches', batchViewSchema, body),
+  processBatch: (
+    id: string,
+    itemId: string,
+    requestId: string,
+    retry: boolean,
+    timeout: number,
+  ) =>
+    request(
+      `/api/dm-batches/${id}/items/${itemId}/process`,
+      batchViewSchema,
+      { request_id: requestId, retry },
+      timeout,
+    ),
   session: () => request('/api/session', sessionSchema),
   login: (token: string) => request('/api/session', sessionSchema, { token }),
   health: () => request('/health', healthSchema),

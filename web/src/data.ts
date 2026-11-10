@@ -8,6 +8,7 @@ export type Conversation = {
   handle: string;
   subject: string;
   kind: string;
+  classification: Analysis['classification'];
   status: Analysis['status'] | 'unanalyzed' | 'running';
   priority: boolean;
   messages: Array<{ role: string; text: string }>;
@@ -20,7 +21,7 @@ export type Conversation = {
   loaded: boolean;
   requestId: string;
 };
-const kinds: Record<string, string> = {
+export const kinds: Record<string, string> = {
   product_inquiry: '상품 문의',
   order_request: '주문 요청',
   payment_claim: '입금 주장',
@@ -42,6 +43,8 @@ export function conversations(state: State): Conversation[] {
       name: room.customer_handle.replace(/^@/, ''),
       handle: room.customer_handle,
       subject: room.context_label || '새 상담',
+      classification:
+        analysis?.classification ?? room.latest?.classification ?? null,
       kind: running
         ? '분석 중'
         : (kinds[
@@ -87,6 +90,10 @@ export const money = (value: number) =>
   new Intl.NumberFormat('ko-KR').format(value) + '원';
 export const needsAttention = (item: Conversation) =>
   !['ready_for_review', 'ignored'].includes(item.status);
+export const reviewRank = (
+  classification: Analysis['classification'],
+  attention: boolean,
+) => (classification === 'claim' ? 0 : attention ? 1 : 2);
 export const policyNames: Record<string, string> = {
   'POL-SHIPPING': '배송비',
   'POL-DISCOUNT': '묶음 할인',

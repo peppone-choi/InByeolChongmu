@@ -31,6 +31,12 @@ import type { Config } from '../config.js';
 import { AppError } from '../domain/errors.js';
 import type { AgentRunner } from '../agent/types.js';
 import { ChatService } from '../agent/service.js';
+import { BatchService } from '../agent/batch-service.js';
+import {
+  createBatchSchema,
+  maxBatchBytes,
+  processBatchItemSchema,
+} from '../domain/batch.js';
 import { Store } from '../storage/store.js';
 import { Tools, toolCatalog } from '../tools/registry.js';
 const resourcesSchemaForReset = reviewedSchema
@@ -53,8 +59,17 @@ export function createApp(
       cookie,
     );
   const chat = new ChatService(store, config, options.runner, options.clock);
+  const batches = new BatchService(store.batches, chat, config.sellerId);
   const imports = new WorkbookImports(store);
   let maintenance = false;
+  const requireWritable = () => {
+    if (maintenance)
+      throw new AppError(
+        'MAINTENANCE',
+        '초기화 중입니다. 잠시 뒤 다시 시도하세요.',
+        409,
+      );
+  };
   let windowStart = Date.now(),
     requests = 0;
   app.use('*', async (c, next) => {
@@ -95,18 +110,15 @@ export function createApp(
         429,
         true,
       );
-    if (maintenance && c.req.method !== 'GET')
-      throw new AppError(
-        'MAINTENANCE',
-        '초기화 중입니다. 잠시 뒤 다시 시도하세요.',
-        409,
-      );
+    if (c.req.method !== 'GET') requireWritable();
     await next();
   });
   app.use('/api/*', async (c, next) =>
     bodyLimit({
       maxSize:
-        c.req.path === '/api/data/import/preview' ? 2 * 1024 * 1024 : 65536,
+        c.req.path === '/api/data/import/preview'
+          ? 2 * 1024 * 1024
+          : maxBatchBytes,
       onError: () => {
         throw new AppError(
           'BODY_TOO_LARGE',
@@ -395,7 +407,7 @@ export function createApp(
       })
       .strict()
       .parse(await parseJson(c.req.raw));
-    if (store.hasRunning(config.sellerId))
+    if (batches.busy || store.hasRunning(config.sellerId))
       throw new AppError('AGENT_BUSY', '분석이 끝난 뒤 초기화하세요.', 409);
     if (scope === 'catalog')
       store.resetCatalog(config.sellerId, input.snapshots);
@@ -478,8 +490,37 @@ export function createApp(
     c.json({ messages: store.messages(config.sellerId, c.req.param('id')) }),
   );
   app.post('/api/chat', async (c) => {
-    const result = await chat.receive(await parseJson(c.req.raw));
+    const body = await parseJson(c.req.raw);
+    requireWritable();
+    const result = await chat.receive(body);
     return c.json(result.body, result.httpStatus);
+  });
+  app.get('/api/dm-batches', (c) =>
+    c.json({ batches: store.batches.list(config.sellerId) }),
+  );
+  app.post('/api/dm-batches', async (c) => {
+    const body = createBatchSchema.parse(await parseJson(c.req.raw));
+    requireWritable();
+    return c.json(store.batches.create(config.sellerId, body));
+  });
+  app.get('/api/dm-batches/:id', (c) =>
+    c.json(
+      store.batches.get(config.sellerId, z.uuid().parse(c.req.param('id'))),
+    ),
+  );
+  app.post('/api/dm-batches/:id/items/:itemId/process', async (c) => {
+    const { request_id, retry } = processBatchItemSchema.parse(
+      await parseJson(c.req.raw),
+    );
+    requireWritable();
+    return c.json(
+      await batches.process(
+        z.uuid().parse(c.req.param('id')),
+        z.uuid().parse(c.req.param('itemId')),
+        request_id,
+        retry,
+      ),
+    );
   });
   const webRoot = resolve(config.root, 'dist/web');
   if (existsSync(resolve(webRoot, 'index.html'))) {

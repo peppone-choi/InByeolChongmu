@@ -4,6 +4,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { z } from 'zod';
 import { Parcels } from './parcel.js';
+import { Batches } from './batches.js';
 import { Commerce } from './commerce.js';
 import type { Analysis } from '../domain/schema.js';
 import type { AgentRun, RunInput, ToolTrace } from '../agent/types.js';
@@ -55,6 +56,7 @@ export class Store {
   private readonly db: DatabaseSync;
   readonly commerce: Commerce;
   readonly parcels: Parcels;
+  readonly batches: Batches;
   constructor(public readonly path: string) {
     if (path !== ':memory:')
       mkdirSync(dirname(resolve(path)), { recursive: true, mode: 0o700 });
@@ -75,6 +77,7 @@ export class Store {
       INSERT OR IGNORE INTO schema_migrations VALUES(2);`);
     this.commerce = new Commerce(this.db, this);
     this.parcels = new Parcels(this.db, this);
+    this.batches = new Batches(this.db, this);
   }
   close() {
     this.db.close();
@@ -472,6 +475,7 @@ export class Store {
           '진행 중인 분석이 끝난 뒤 초기화하세요.',
           409,
         );
+      this.batches.clear(seller);
       this.db
         .prepare(
           'DELETE FROM agent_tool_calls WHERE run_id IN (SELECT id FROM agent_runs WHERE seller_id=?)',
@@ -512,6 +516,7 @@ export class Store {
         .map((r) => JSON.parse(String(r.payload)) as unknown),
       parcel_template: this.parcels.template(seller),
       parcel_exports: this.parcels.list(seller),
+      dm_batches: this.batches.export(seller),
       conversations: this.db
         .prepare('SELECT * FROM conversations WHERE seller_id=? ORDER BY rowid')
         .all(seller),

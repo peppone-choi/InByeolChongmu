@@ -39,6 +39,30 @@ export class ChatService {
   }
   async receive(raw: unknown) {
     const parsed = chatSchema.safeParse(raw);
+    if (
+      !parsed.success &&
+      raw &&
+      typeof raw === 'object' &&
+      'customer_handle' in raw &&
+      typeof raw.customer_handle === 'string' &&
+      !raw.customer_handle.trim() &&
+      parsed.error.issues.every(({ path }) => path[0] === 'customer_handle')
+    ) {
+      const request =
+        'request_id' in raw && typeof raw.request_id === 'string'
+          ? raw.request_id.trim()
+          : randomUUID();
+      const analysis = emptyAnalysis(request);
+      analysis.classification = 'invalid_input';
+      analysis.status = 'invalid_input';
+      const error = {
+        code: 'HANDLE_REQUIRED',
+        message: '고객 아이디를 입력하세요.',
+        retryable: false,
+      };
+      analysis.review_items = [error];
+      return { httpStatus: 422 as const, body: { error, analysis } };
+    }
     if (!parsed.success)
       throw new AppError(
         'INVALID_INPUT',
@@ -101,7 +125,7 @@ export class ChatService {
       analysis.status = 'unsupported';
       analysis.review_items = [
         {
-          code: 'IMAGE_ONLY_UNSUPPORTED',
+          code: 'TEXT_REQUIRED',
           message: '사진만 있는 DM은 지원하지 않습니다.',
         },
       ];

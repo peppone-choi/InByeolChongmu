@@ -2503,3 +2503,67 @@ h3 {
     gap: 8px;
   }
 }
+
+.inbox-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--space-xs);
+}
+.batch-dialog {
+  width: min(640px, calc(100% - 32px));
+}
+.batch-panel,
+.batch-panel form,
+.batch-panel fieldset {
+  display: grid;
+  gap: var(--space-sm);
+  min-width: 0;
+}
+.batch-panel fieldset,
+.batch-list > li {
+  border: 1px solid var(--color-rule);
+  border-radius: var(--radius-md);
+  padding: var(--space-sm);
+}
+.batch-field {
+  display: grid;
+  gap: var(--space-xs);
+  font-size: 13px;
+}
+.batch-field select {
+  width: 100%;
+  min-width: 0;
+  color: var(--color-ink);
+  background: var(--color-surface);
+  border: 1px solid var(--color-rule);
+  border-radius: var(--radius-md);
+  padding: var(--space-sm);
+}
+.batch-panel form footer {
+  flex-wrap: wrap;
+}
+.batch-list {
+  display: grid;
+  gap: var(--space-xs);
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.batch-list > li > p {
+  margin-block: var(--space-xs);
+}
+.batch-list details summary {
+  cursor: pointer;
+  color: var(--color-muted);
+}
+.batch-original {
+  white-space: pre-wrap;
+}
+@media (max-width: 430px) {
+  .inbox-actions .button {
+    font-size: 12px;
+    white-space: nowrap;
+  }
+}

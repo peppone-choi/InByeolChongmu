@@ -24,6 +24,7 @@ export class FlueRunner implements AgentRunner {
   private runtime: Promise<Flue> | undefined;
   private removeInstrumentation: (() => Promise<void>) | undefined;
   private readonly agent: ReturnType<typeof createRuntimeAgent>;
+  private readonly modelLimitRuns = new Set<string>();
   private readonly countedTurns = new Set<string>();
   private readonly active = new Map<
     string,
@@ -120,10 +121,19 @@ export class FlueRunner implements AgentRunner {
               );
             const turnKey = context.instanceId + ':' + operation.turnId;
             if (!this.countedTurns.has(turnKey)) {
-              this.store.countModelCall(
-                context.instanceId,
-                this.config.maxModelCalls,
-              );
+              try {
+                this.store.countModelCall(
+                  context.instanceId,
+                  this.config.maxModelCalls,
+                );
+              } catch (error) {
+                if (
+                  error instanceof AppError &&
+                  error.code === 'MODEL_CALL_LIMIT'
+                )
+                  this.modelLimitRuns.add(context.instanceId);
+                throw error;
+              }
               this.countedTurns.add(turnKey);
             }
           }
@@ -155,6 +165,7 @@ export class FlueRunner implements AgentRunner {
     if (existing) return existing;
     const promise = this.execute(run).finally(() => {
       this.active.delete(run.id);
+      this.modelLimitRuns.delete(run.id);
       for (const key of this.countedTurns)
         if (key.startsWith(run.id + ':')) this.countedTurns.delete(key);
     });
@@ -216,6 +227,12 @@ export class FlueRunner implements AgentRunner {
         );
       }
       if (error instanceof AppError) throw error;
+      if (this.modelLimitRuns.has(run.id))
+        throw new AppError(
+          'MODEL_CALL_LIMIT',
+          '모델 호출 한도를 초과했습니다.',
+          503,
+        );
       throw new AppError(
         'AGENT_EXECUTION_FAILED',
         '모델 실행이 실패했습니다. 인증·모델 접근·도구 결과를 확인하세요.',

@@ -4,6 +4,7 @@ import { relative, resolve, isAbsolute } from 'node:path';
 import { z } from 'zod';
 import { AppError } from '../domain/errors.js';
 import type { Store } from '../storage/store.js';
+import { mentionsRecipient } from '../agent/customer-text.js';
 
 const query = z.string().trim().min(1).max(200);
 const itemsSchema = z
@@ -40,7 +41,7 @@ const descriptions: Record<ToolName, string> = {
     '조회 전용: 상품명·별칭·SKU로 모든 후보와 가격·재고·버전을 찾습니다.',
   get_policies: '조회 전용: 판매 정책을 근거 ID와 자료 버전으로 반환합니다.',
   search_orders:
-    '조회 전용: 고객 아이디·이름·주문 ID로 찾으며 연결된 방에서는 해당 고객만 조회합니다.',
+    '조회 전용: 고객 아이디·이름·주문 ID로 찾습니다. 채팅에서 현재 고객 주문이 없고 고객 원문에 있는 이름으로 검색하면 판매자 검토용 후보 ID만 반환할 수 있습니다.',
   get_sales_calendar:
     '조회 전용: 자료에 명시된 공구 마감·출고 예정일을 기간으로 조회합니다. 외부 캘린더가 아닙니다.',
   read_document:
@@ -63,6 +64,7 @@ export class Tools {
     private readonly root: string,
     private readonly clock: () => Date = () => new Date(),
     private readonly customerHandle?: string,
+    private readonly customerTexts?: readonly string[],
   ) {}
   call(name: string, input: unknown): unknown {
     if (!Object.hasOwn(toolSchemas, name))
@@ -89,16 +91,24 @@ export class Tools {
   }
   private searchProducts(value: string) {
     const needle = value.toLocaleLowerCase('ko');
-    const records = this.store
-      .products(this.sellerId)
-      .filter((p) =>
-        [
-          p.product_id,
-          p.name,
-          ...p.aliases,
-          ...p.variants.map((v) => v.sku),
-        ].some((field) => field.toLocaleLowerCase('ko').includes(needle)),
+    const products = this.store.products(this.sellerId);
+    const includes = (fields: string[], term: string) =>
+      fields.some((field) => field.toLocaleLowerCase('ko').includes(term));
+    const terms = needle.split(/\s+/u);
+    const records = products.filter((p) => {
+      const identity = [p.product_id, p.name, ...p.aliases];
+      if (includes([...identity, ...p.variants.map(({ sku }) => sku)], needle))
+        return true;
+      return (
+        terms.length > 1 &&
+        terms.some((term) => includes(identity, term)) &&
+        p.variants.some(({ sku, color, size }) =>
+          terms.every((term) =>
+            includes([...identity, sku, color, size], term),
+          ),
+        )
       );
+    });
     return {
       source_type: 'product',
       ...this.store.source(this.sellerId, 'product'),
@@ -120,19 +130,39 @@ export class Tools {
   }
   private orders(value: string) {
     const needle = value.toLocaleLowerCase('ko');
-    const matches = this.store
-      .orders(this.sellerId)
-      .filter(
-        (o) =>
-          (!this.customerHandle || o.customer_handle === this.customerHandle) &&
-          [o.order_id, o.customer_handle, o.recipient.name].some(
-            (v) => v.toLocaleLowerCase('ko') === needle,
-          ),
-      );
-    // Candidate lists omit addresses and phone numbers; an unambiguous match can include its record.
-    return {
+    const orders = this.store.orders(this.sellerId);
+    const matches = orders.filter(
+      (o) =>
+        (!this.customerHandle || o.customer_handle === this.customerHandle) &&
+        [o.order_id, o.customer_handle, o.recipient.name].some(
+          (v) => v.toLocaleLowerCase('ko') === needle,
+        ),
+    );
+    const source = {
       source_type: 'order',
       ...this.store.source(this.sellerId, 'order'),
+    };
+    if (
+      matches.length === 0 &&
+      this.customerHandle &&
+      this.customerTexts?.some((text) => mentionsRecipient(text, needle))
+    ) {
+      const candidates = orders
+        .filter(
+          (order) => order.recipient.name.toLocaleLowerCase('ko') === needle,
+        )
+        .map(({ order_id }) => ({ order_id }));
+      if (candidates.length)
+        return {
+          ...source,
+          ambiguous: candidates.length > 1,
+          review_only: true,
+          records: candidates,
+        };
+    }
+    // Candidate lists omit addresses and phone numbers; an unambiguous match can include its record.
+    return {
+      ...source,
       ambiguous: matches.length > 1,
       records:
         matches.length === 1
@@ -143,6 +173,23 @@ export class Tools {
               recipient_name: o.recipient.name,
               status: o.status,
             })),
+    };
+  }
+  reviewPaymentCandidates(texts: readonly string[]) {
+    const records = this.store
+      .orders(this.sellerId)
+      .filter(
+        (order) =>
+          order.customer_handle !== this.customerHandle &&
+          texts.some((text) => mentionsRecipient(text, order.recipient.name)),
+      )
+      .map(({ order_id }) => ({ order_id }));
+    return {
+      source_type: 'order',
+      ...this.store.source(this.sellerId, 'order'),
+      ambiguous: records.length > 1,
+      review_only: true,
+      records,
     };
   }
   private calendar({ from, to }: { from: string; to: string }) {

@@ -12,7 +12,7 @@
 
 ## 프로젝트 구조와 모듈 구성
 
-이 저장소는 로컬 백엔드와 자료 도구를 구현한 단계입니다. `src/http`는 Hono API, `src/storage`는 SQLite·주문/발송 서비스(`commerce.ts`)·자료 XLSX(`data-workbook.ts`)·택배 명단/열 설정/파일 스냅샷(`parcel.ts`), `src/tools`는 읽기·계산 도구와 MCP stdio, `src/agent`는 채팅 수신 서비스와 Flue 도구/에이전트 팩터리, `src/domain`은 입력·출력 검증입니다. `src/cli`는 같은 기능의 CLI이며 `tests/backend.test.ts`는 Node 표준 테스트입니다. `src/agent/flue-runner.ts`가 실제 Flue 실행기, `runtime-agent.ts`가 방 맥락·도구·제출 계약, `typesafe.ts`가 Jev 분류 연결입니다. `Dockerfile`과 `compose.yaml`은 웹과 API 단일 서버 배포를 제공합니다. `web/`은 React·Vite 검토 화면이며 실제 API를 호출합니다. `web/src/api.ts`는 검증된 HTTP 계약, `workspace.ts`는 방별 상태·재시도, `data.ts`는 서버 자료 표시 변환, `App.tsx`는 화면, `ResourceEditor.tsx`는 상품·정책 CRUD 폼, `Orders.tsx`는 주문 저장 이후 수정·입금 확인·확정, `ShipmentPanel.tsx`는 발송/정정/이력, `ParcelExportPanel.tsx`는 택배용 미리보기/열 설정/파일, `DataManagement.tsx`는 엑셀/독립 초기화, `main.tsx`는 React 진입점, `resource-version.ts`는 오래된 분석 판정입니다. `src/domain/http-contract.ts`가 공유 응답 스키마이고 `src/http/session.ts`는 브라우저 연결 세션입니다.
+이 저장소는 로컬 백엔드와 자료 도구를 구현한 단계입니다. `src/http`는 Hono API, `src/storage/batches.ts`와 `src/agent/batch-service.ts`는 SQLite 일괄 접수와 건별 분석, `web/src/BatchPanel.tsx`는 접수·진행·재시도 화면, `src/storage`는 SQLite·주문/발송 서비스(`commerce.ts`)·자료 XLSX(`data-workbook.ts`)·택배 명단/열 설정/파일 스냅샷(`parcel.ts`), `src/tools`는 읽기·계산 도구와 MCP stdio, `src/agent`는 채팅 수신 서비스와 Flue 도구/에이전트 팩터리, `src/domain`은 입력·출력 검증입니다. `src/cli`는 같은 기능의 CLI이며 `tests/backend.test.ts`는 Node 표준 테스트입니다. `src/agent/flue-runner.ts`가 실제 Flue 실행기, `runtime-agent.ts`가 방 맥락·도구·제출 계약, `typesafe.ts`가 Jev 분류 연결입니다. `Dockerfile`과 `compose.yaml`은 웹과 API 단일 서버 배포를 제공합니다. `web/`은 React·Vite 검토 화면이며 실제 API를 호출합니다. `web/src/api.ts`는 검증된 HTTP 계약, `workspace.ts`는 방별 상태·재시도, `data.ts`는 서버 자료 표시 변환, `App.tsx`는 화면, `ResourceEditor.tsx`는 상품·정책 CRUD 폼, `Orders.tsx`는 주문 저장 이후 수정·입금 확인·확정, `ShipmentPanel.tsx`는 발송/정정/이력, `ParcelExportPanel.tsx`는 택배용 미리보기/열 설정/파일, `DataManagement.tsx`는 엑셀/독립 초기화, `main.tsx`는 React 진입점, `resource-version.ts`는 오래된 분석 판정입니다. `src/domain/http-contract.ts`가 공유 응답 스키마이고 `src/http/session.ts`는 브라우저 연결 세션입니다.
 
 `README.md`는 실행·지원 상태, `docs/backend.md`는 실제 API·저장·도구 계약, `docs/implementation-plan.md`는 구현 결정과 남은 연결·품질 평가 계획입니다. `docs/samples/`의 가상 자료와 Python 검사·회귀 테스트도 유지합니다.
 
@@ -54,11 +54,13 @@ DM 샘플의 `conversation`을 원본으로 유지하고 분석용 `input.text`�
 
 작업 우선순위는 `docs/implementation-plan.md`의 제품 흐름을 따릅니다. 읽기 에이전트·자료 관리 화면을 주문 MVP 완성으로 보고하지 마세요. 분석 JSON의 `order_draft`는 저장된 주문이 아니며 후보 저장·판매자 확인/확정·발송/정정·택배 내보내기를 구분하세요. 주문 저장·확정은 Commerce의 단일 명령 경로와 `BEGIN IMMEDIATE` 트랜잭션을 사용합니다. 수령인·입금자·SKU별 저장 가격/상품명은 확정 당시 값을 유지하고 현재 상품으로 과거 금액을 재계산하지 마세요. 발송 등록/정정은 같은 트랜잭션에 감사 기록과 명령 결과를 쓰며 재고/금액/수령인을 바꾸지 않습니다. 새 관리 주문과 과거 JSON 주문을 복제하지 말고 동일 조회에 최신 송장을 반영하세요. 택배 파일은 상태/열/기존 내보내기 지문을 다시 검사한 후 생성하고 재내보내기는 확인을 받습니다. 실제 택배사 양식과 공통 명단을 구분하세요. 주문 삭제는 발송 이력과 해당 파일 스냅샷을 폐기하며 주문 전체 초기화는 내보내기 이력도 삭제합니다. 동일 명령 재시도와 두 프로세스의 마지막 재고 경쟁을 검사하세요. 상품·정책 CRUD·독립 초기화·웹 엑셀 미리보기·현재 데이터 반출과 수동 발송/송장 정정·이력·공통 택배 명단/열 설정은 구현됐으며 실제 택배사 양식 호환성·접수/송장 발급·주문/대화 재가져오기는 미구현입니다.
 
-키는 `.env.local`의 `OPENAI_API_KEY`·`TYPESAFE_API_KEY`로 받으며 값은 출력하거나 커밋하지 마세요. 기본 `AGENT_BACKEND=disabled`로 키 없이 자료 도구를 사용할 수 있습니다. 실제 호출은 `flue`와 모델·키를 설정해야 하며 `npm run verify:agent`는 명시적으로 실행하는 유료 가상 자료 연결 검사입니다. 자동 테스트에서 로컬 키를 사용하지 마세요.
+일괄 DM은 최대 10건·요청 64 KiB를 유지합니다. 조회·새로고침은 모델을 실행하지 않고, 응답 미확인은 같은 요청 ID로 이어서 처리하며 종료된 실패만 새 ID로 재분석합니다. 일괄 접수 원문은 채팅 초기화에서 삭제하고 현재 데이터 반출에 포함하세요. 다른 계정 주문은 판매자 검토 후보 ID만 반환하고 입금 주장과 입금자명은 최신 고객 발화에서 별도로 확인하세요.
+
+키는 `.env.local`의 `OPENAI_API_KEY`·`TYPESAFE_API_KEY`로 받으며 값은 출력하거나 커밋하지 마세요. 기본 `AGENT_BACKEND=disabled`로 키 없이 자료 도구를 사용할 수 있습니다. 실제 호출은 `flue`와 모델·키를 설정해야 하며 `npm run verify:agent`는 명시적으로 실행하는 유료 가상 자료 연결 검사입니다. 자동 테스트에서 로컬 키를 사용하지 마세요. 가상 40건 평가 CLI는 `npm run --silent eval:agent`로 대상만 표시하고, 실제 호출은 `-- --live`로 명시합니다. 사례별 격리 DB·고정 기대값을 사용하고 실패와 수동 검토를 분리합니다. 평가 전후의 입력·기대값과 모델·호출 한도를 대조하고, 실패 로그에는 도구명과 검증 항목만 기록하세요.
 
 Flue·Jev·Hermes·OpenAI Agents API·AI Gateway가 사용자가 지정한 우선 활용 기술군입니다. `docs/implementation-plan.md`의 역할·연결 검증 계획을 따르고, 도구를 쓸 수 있는 실행기를 단순 모델 호출 코드로 대체한다고 임의로 결정하지 마세요. 실행기 중복·게이트웨이 호환성·앱 자체의 자료 접근 권한은 실제로 검증하고, 연결되지 않은 도구를 사용 가능으로 표시하지 마세요.
 
-구현 전 `docs/planning.md`의 승인 경계와 검증 목표를 확인하세요. 분류·추출·초안의 책임을 구분하고, 구조화된 추출값과 금액 계산은 코드로 검증하세요. 수령 정보는 customer 원문과 대조하고 assistant 초안을 증거로 삼지 마세요. 금액이 null이어도 확정 SKU·수량의 견적과 품절·마감 검토를 생략하지 마세요. 실행 만료 시각을 저장하고 재시작으로 제한 시간을 초기화하지 마세요. 근거가 없거나 검증하지 못한 결과를 통과로 처리하지 마세요. 수치 일치만으로 답변 전체의 사실성을 보장한다고 보고하지 마세요.
+구현 전 `docs/planning.md`의 승인 경계와 검증 목표를 확인하세요. 분류·추출·초안의 책임을 구분하고, 구조화된 추출값과 금액 계산은 코드로 검증하세요. 수령 정보는 customer 원문과 명시적 정정을 대조하고 판매자 발화나 assistant 초안을 증거로 삼지 마세요. 조회 결과가 비었을 때는 서버의 사실 없는 확인 질문만 근거 없이 허용합니다. 검토 상태는 실제 조회·견적과 누락/오류를 대조합니다. 고객 원문에 있는 이름으로 찾은 다른 계정 주문은 판매자 검토용 ID만 반환하며 상세 조회·고객 답장·근거·주문 초안으로 이어지지 않도록 검증하세요. 금액이 null이어도 확정 SKU·수량의 견적과 품절·마감 검토를 생략하지 마세요. 실행 만료 시각을 저장하고 재시작으로 제한 시간을 초기화하지 마세요. 근거가 없거나 검증하지 못한 결과를 통과로 처리하지 마세요. 수치 일치만으로 답변 전체의 사실성을 보장한다고 보고하지 마세요.
 
 ## 커밋과 풀 리퀘스트 지침
 

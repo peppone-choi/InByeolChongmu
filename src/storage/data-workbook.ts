@@ -505,6 +505,37 @@ export async function exportCurrentWorkbook(store: Store, seller: string) {
     ]),
   );
   add(
+    'dm_batch_items',
+    [
+      'batch_id',
+      'created_at',
+      'position',
+      'item_id',
+      'request_id',
+      'customer_handle',
+      'context_label',
+      'text',
+      'conversation_id',
+      'status',
+      'outcome',
+    ],
+    data.dm_batches.flatMap((batch) =>
+      batch.items.map((item, index) => [
+        batch.batch_id,
+        batch.created_at,
+        index + 1,
+        item.item_id,
+        item.request_id,
+        item.customer_handle,
+        item.context_label,
+        item.text,
+        item.conversation_id,
+        item.status,
+        item.outcome,
+      ]),
+    ),
+  );
+  add(
     'conversations',
     ['id', 'customer_handle', 'context_label', 'created_at'],
     data.conversations.map((c) => [
