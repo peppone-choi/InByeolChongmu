@@ -28,6 +28,22 @@ export const messageSchema = z.object({
   text: z.string(),
   created_at: z.string(),
 });
+export const extractionFieldSchema = z.enum([
+  'order_draft.recipient.name',
+  'order_draft.recipient.phone_raw',
+  'order_draft.recipient.address_raw',
+  'order_draft.recipient.postal_code',
+  'order_draft.depositor_name',
+  'payment_claim.depositor_name',
+]);
+const extractionSourceSchema = z
+  .object({
+    field: extractionFieldSchema,
+    message_id: z.string(),
+    start: z.number().int().nonnegative(),
+    end: z.number().int().positive(),
+  })
+  .refine(({ start, end }) => start < end);
 export const resultSchema = z.object({
   conversation_id: z.string(),
   replayed: z.boolean(),
@@ -51,6 +67,7 @@ export const roomDetailSchema = z.object({
   conversation: roomSchema,
   messages: z.array(messageSchema),
   latest: latestSchema.nullable(),
+  extraction_sources: z.array(extractionSourceSchema).optional(),
 });
 export const roomSummarySchema = roomSchema.extend({
   latest: latestSchema
@@ -90,6 +107,8 @@ export const sessionSchema = z.object({
 export type ExecutionView = z.infer<typeof executionSchema>;
 export type ChatResult = z.infer<typeof resultSchema>;
 export type RoomDetail = z.infer<typeof roomDetailSchema>;
+export type ExtractionField = z.infer<typeof extractionFieldSchema>;
+export type ExtractionSource = z.infer<typeof extractionSourceSchema>;
 export type RoomSummary = z.infer<typeof roomSummarySchema>;
 export type Resources = z.infer<typeof resourcesSchema>;
 export type Health = z.infer<typeof healthSchema>;

@@ -273,6 +273,7 @@ export class Workspace {
         ...this.state.details,
         [id]: {
           ...prior,
+          extraction_sources: [],
           latest: {
             request_id: input.request_id!,
             text: input.text,

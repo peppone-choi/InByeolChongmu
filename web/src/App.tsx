@@ -55,6 +55,9 @@ import { DataManagement } from './DataManagement';
 import { api } from './api';
 import { ResourceEditor } from './ResourceEditor';
 import { ToolProgress } from './ToolProgress';
+import { ExtractionText, extractionLabels } from './ExtractionText';
+import { extractionExcerpts } from './extraction-excerpts';
+import type { ExtractionField } from '../../src/domain/http-contract.js';
 import { BatchPanel } from './BatchPanel';
 import './tokens.css';
 import './styles.css';
@@ -151,13 +154,37 @@ export default function App() {
     [copyState, setCopyState] = useState<
       'idle' | 'loading' | 'success' | 'error' | 'unverified'
     >('idle');
-  const [modal, setModal] = useState<'new' | 'batch' | 'about' | null>(null),
+  const [modal, setModal] = useState<
+      'new' | 'batch' | 'about' | 'source' | null
+    >(null),
     [formError, setFormError] = useState('');
   const dialogRef = useRef<HTMLDialogElement>(null),
     returnFocus = useRef<HTMLElement | null>(null),
     draftRef = useRef<HTMLTextAreaElement>(null);
+  const messageStream = useRef<HTMLDivElement>(null);
+  const [sourceJump, setSourceJump] = useState<{
+    requestId: string;
+    field: ExtractionField;
+  } | null>(null);
+  const [sourcePreview, setSourcePreview] = useState<{
+    requestId: string;
+    field: ExtractionField;
+    value: string;
+  } | null>(null);
   const active = items.find((item) => item.id === activeId) ?? items[0];
   const editId = active?.requestId ?? '';
+  const preview =
+    modal === 'source' && sourcePreview?.requestId === editId
+      ? sourcePreview
+      : null;
+  const excerpts =
+    preview && active
+      ? extractionExcerpts(
+          active.messages,
+          active.extractionSources,
+          preview.field,
+        )
+      : [];
   const draft = active ? (edited[editId] ?? active.draft ?? '') : '';
   const pending = active ? state.pending[active.id] : undefined;
   const currentLatest = active ? state.details[active.id]?.latest : null;
@@ -168,6 +195,47 @@ export default function App() {
       : null;
   const busy = active?.status === 'running';
   const stale = analysisIsStale(currentLatest, state.resources);
+
+  useEffect(() => {
+    if (
+      !sourceJump ||
+      sourceJump.requestId !== editId ||
+      mobilePane !== 'conversation'
+    )
+      return;
+    const mark = messageStream.current?.querySelector<HTMLElement>(
+      `mark[data-extraction-fields~="${sourceJump.field}"]`,
+    );
+    mark?.focus({ preventScroll: true });
+    mark?.scrollIntoView({ block: 'nearest' });
+    setSourceJump(null);
+  }, [sourceJump, editId, mobilePane]);
+
+  const sourceLink = (field: ExtractionField, value: string | null) => {
+    if (!value) return null;
+    const count =
+      active?.extractionSources.filter((source) => source.field === field)
+        .length ?? 0;
+    if (!count) return <span className="inline-note">원문 위치 미확인</span>;
+    return (
+      <button
+        type="button"
+        className="source-link"
+        aria-label={extractionLabels[field] + ' 원문 보기'}
+        onClick={() => {
+          if (count > 1) {
+            setSourcePreview({ requestId: editId, field, value });
+            setModal('source');
+          } else {
+            setMobilePane('conversation');
+            setSourceJump({ requestId: editId, field });
+          }
+        }}
+      >
+        원문 보기
+      </button>
+    );
+  };
 
   const currentId = useRef(active?.id);
   currentId.current = active?.id;
@@ -607,10 +675,10 @@ export default function App() {
                               : '이력 불러오는 중'}
                           </span>
                         </div>
-                        <div className="message-stream">
+                        <div className="message-stream" ref={messageStream}>
                           {active.messages.map((message, index) => (
                             <div
-                              key={index}
+                              key={message.id ?? index}
                               className={`message message-${message.role}`}
                             >
                               <span className="message-author">
@@ -618,7 +686,19 @@ export default function App() {
                                   ? '에이전트 · 답장 초안 (전송 전)'
                                   : active.name}
                               </span>
-                              <div className="bubble">{message.text}</div>
+                              <div className="bubble">
+                                <ExtractionText
+                                  text={message.text}
+                                  sources={
+                                    message.role === 'customer' && message.id
+                                      ? active.extractionSources.filter(
+                                          ({ message_id }) =>
+                                            message_id === message.id,
+                                        )
+                                      : []
+                                  }
+                                />
+                              </div>
                             </div>
                           ))}
                         </div>
@@ -1064,15 +1144,27 @@ export default function App() {
                                 <dt>받는 사람</dt>
                                 <dd>
                                   {active.order.recipient.name ?? '미확인'}
+                                  {sourceLink(
+                                    'order_draft.recipient.name',
+                                    active.order.recipient.name,
+                                  )}
                                 </dd>
                                 <dt>연락처</dt>
                                 <dd>
                                   {active.order.recipient.phone_raw ?? '미확인'}
+                                  {sourceLink(
+                                    'order_draft.recipient.phone_raw',
+                                    active.order.recipient.phone_raw,
+                                  )}
                                 </dd>
                                 <dt>주소</dt>
                                 <dd>
                                   {active.order.recipient.address_raw ??
                                     '미확인'}
+                                  {sourceLink(
+                                    'order_draft.recipient.address_raw',
+                                    active.order.recipient.address_raw,
+                                  )}
                                   <span className="inline-note">
                                     주소 확인:{' '}
                                     {
@@ -1087,9 +1179,25 @@ export default function App() {
                                     }
                                   </span>
                                 </dd>
+                                {active.order.recipient.postal_code && (
+                                  <>
+                                    <dt>우편번호</dt>
+                                    <dd>
+                                      {active.order.recipient.postal_code}
+                                      {sourceLink(
+                                        'order_draft.recipient.postal_code',
+                                        active.order.recipient.postal_code,
+                                      )}
+                                    </dd>
+                                  </>
+                                )}
                                 <dt>입금자</dt>
                                 <dd>
                                   {active.order.depositor_name ?? '미확인'}
+                                  {sourceLink(
+                                    'order_draft.depositor_name',
+                                    active.order.depositor_name,
+                                  )}
                                 </dd>
                               </dl>
                             </div>
@@ -1126,6 +1234,10 @@ export default function App() {
                               입금자명:{' '}
                               {active.analysis.payment_claim.depositor_name ??
                                 '원문에서 확인되지 않음'}
+                              {sourceLink(
+                                'payment_claim.depositor_name',
+                                active.analysis.payment_claim.depositor_name,
+                              )}
                             </p>
                             <p className="small muted">
                               고객이 입금했다고 말했습니다. 실제 입금은 판매자가
@@ -1405,7 +1517,11 @@ export default function App() {
               ? '일괄 DM 처리'
               : modal === 'new'
                 ? 'DM 추가'
-                : '이 화면에서 할 수 있는 일'}
+                : modal === 'source'
+                  ? preview
+                    ? extractionLabels[preview.field] + ' 원문'
+                    : '원문 보기'
+                  : '이 화면에서 할 수 있는 일'}
           </h2>
           <button
             className="icon-button"
@@ -1415,7 +1531,34 @@ export default function App() {
             <X size={20} />
           </button>
         </header>
-        {modal === 'batch' ? (
+        {modal === 'source' ? (
+          preview && excerpts.length ? (
+            <div className="source-preview">
+              <p className="small muted">
+                추출된 {extractionLabels[preview.field]}
+              </p>
+              <p className="source-preview-value">{preview.value}</p>
+              <dl>
+                {excerpts.map((excerpt, index) => (
+                  <div key={excerpt.message_id + ':' + excerpt.start}>
+                    <dt>
+                      {preview.field === 'order_draft.recipient.address_raw'
+                        ? index === excerpts.length - 1
+                          ? '새 동·호·층'
+                          : '유지된 주소'
+                        : '원문 구간 ' + (index + 1)}
+                    </dt>
+                    <dd>
+                      <mark>{excerpt.text}</mark>
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+            </div>
+          ) : (
+            <p className="muted">원문 위치 미확인</p>
+          )
+        ) : modal === 'batch' ? (
           <BatchPanel
             timeout={(state.health?.agent_timeout_ms ?? 60000) + 15000}
             onChanged={() => workspace.reloadRooms()}

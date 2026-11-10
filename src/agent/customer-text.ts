@@ -1,21 +1,31 @@
 import type { RunInput } from './types.js';
 
+export function customerSegments(text: string) {
+  const segments: { text: string; start: number }[] = [];
+  let start = 0;
+  let customer = true;
+  const append = (end: number) => {
+    const part = text.slice(start, end);
+    if (customer && part.trim()) segments.push({ text: part, start });
+  };
+  for (const marker of text.matchAll(/^[\t ]*\[(고객|판매자)\]/gm)) {
+    append(marker.index!);
+    customer = marker[1] === '고객';
+    start = marker.index! + marker[0].length;
+  }
+  append(text.length);
+  return segments;
+}
+
 export function customerTexts(input: RunInput, latest = false): string[] {
   return input.history
     .filter(
       ({ role, request_id }) =>
         role === 'customer' && (!latest || request_id === input.request_id),
     )
-    .flatMap(({ text }) => {
-      let customer = true;
-      const segments: string[] = [];
-      for (const part of text.split(/^(\[고객\]|\[판매자\])/m)) {
-        if (part === '[고객]' || part === '[판매자]')
-          customer = part === '[고객]';
-        else if (customer && part.trim()) segments.push(part);
-      }
-      return segments;
-    });
+    .flatMap(({ text }) =>
+      customerSegments(text).map((segment) => segment.text),
+    );
 }
 
 export const compactText = (value: string) =>
@@ -48,21 +58,31 @@ export function hasPaymentQuestion(text: string): boolean {
 }
 
 export function paymentStatement(texts: readonly string[]) {
-  const text = texts.join('\n');
+  const claim = locatePaymentStatement(texts.join('\n'));
+  if (!claim) return undefined;
+  return {
+    depositor_name: claim.depositor?.name ?? null,
+    customer_claimed_paid: true as const,
+  };
+}
+
+export function locatePaymentStatement(text: string) {
   const asserted = (match: RegExpMatchArray) => !isPaymentQuestion(text, match);
   const statements = [...text.matchAll(paymentMention)].filter(asserted);
   const last = statements.at(-1)?.[0];
   if (!last || /못\s*했|안\s*했|아직|전이/u.test(last)) return undefined;
   const names = [
     ...text.matchAll(
-      /(?:^|\s)([\p{L}][\p{L}\p{M}·.-]{1,79})\s*(?:이름으로|명의로)\s*(?:[\d,]+\s*(?:원\s*)?)?(?:입금\s*)?(?:했|햇|넣었|보냈|드렸|완료)/gmu,
+      /(?:^|\s)([\p{L}][\p{L}\p{M}·.-]{1,79})\s*(?:이름으로|명의로)\s*(?:[\d,]+\s*(?:원\s*)?)?(?:입금\s*)?(?:했|햇|넣었|보냈|드렸|완료)/dgmu,
     ),
   ].filter(asserted);
-  const name = names.at(-1)?.[1];
+  const match = names.at(-1);
+  const name = match?.[1];
   return {
-    depositor_name:
-      name && !/^(제|내|본인|남편|아내|가족|친구)$/u.test(name) ? name : null,
-    customer_claimed_paid: true as const,
+    depositor:
+      name && !/^(제|내|본인|남편|아내|가족|친구)$/u.test(name)
+        ? { name, start: match!.indices![1]![0] }
+        : null,
   };
 }
 

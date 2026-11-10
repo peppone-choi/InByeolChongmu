@@ -1,3 +1,4 @@
+import type { ExtractionSource } from '../../src/domain/http-contract.js';
 import type { Analysis } from '../../src/domain/schema';
 import type { State } from './workspace';
 export type Category = 'all' | 'attention' | 'ready';
@@ -11,7 +12,8 @@ export type Conversation = {
   classification: Analysis['classification'];
   status: Analysis['status'] | 'unanalyzed' | 'running';
   priority: boolean;
-  messages: Array<{ role: string; text: string }>;
+  messages: Array<{ id?: string; role: string; text: string }>;
+  extractionSources: ExtractionSource[];
   draft: string | null;
   note: string;
   order: Analysis['order_draft'];
@@ -57,6 +59,7 @@ export function conversations(state: State): Conversation[] {
       messages: detail?.messages ?? [
         { role: 'customer', text: room.latest?.preview ?? '' },
       ],
+      extractionSources: running ? [] : (detail?.extraction_sources ?? []),
       draft: running ? null : (analysis?.reply_draft ?? null),
       note:
         analysis?.review_items[0]?.message ||

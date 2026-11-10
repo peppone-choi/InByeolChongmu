@@ -14,6 +14,7 @@ import { readConfig } from '../src/config.js';
 import { FlueRunner } from '../src/agent/flue-runner.js';
 import { createApp } from '../src/http/app.js';
 import { emptyAnalysis, type Analysis } from '../src/domain/schema.js';
+import { roomDetailSchema } from '../src/domain/http-contract.js';
 const root = process.cwd(),
   seller = 'sample-seller-01';
 const post = (body: unknown) => ({
@@ -121,6 +122,25 @@ test('actual Flue loop reads room history, executes real tools, validates and re
           call.name === 'quote_order' && call.success,
       ),
     );
+    const detail = roomDetailSchema.parse(
+      await (await app.request('/api/conversations/' + room.id)).json(),
+    );
+    const highlights = detail.extraction_sources!.map(
+      ({ field, message_id, start, end }) => {
+        const message = detail.messages.find(({ id }) => id === message_id)!;
+        assert.equal(message.request_id, body.request_id);
+        return [field, message.text.slice(start, end)];
+      },
+    );
+    assert.deepEqual(highlights, [
+      ['order_draft.recipient.name', '샘플하나'],
+      ['order_draft.recipient.phone_raw', '010-0000-1001'],
+      [
+        'order_draft.recipient.address_raw',
+        '가상시 예시구 테스트로 101 샘플동 202호',
+      ],
+      ['order_draft.depositor_name', '샘플하나'],
+    ]);
     assert.equal(faux.state.callCount, 3);
     const repeated = await app.request('/api/chat', post(body));
     assert.equal(repeated.status, 200);
