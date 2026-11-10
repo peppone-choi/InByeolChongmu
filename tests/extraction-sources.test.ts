@@ -6,6 +6,7 @@ import { roomDetailSchema } from '../src/domain/http-contract.js';
 import { analysisSchema, emptyAnalysis } from '../src/domain/schema.js';
 import { createApp } from '../src/http/app.js';
 import { Store } from '../src/storage/store.js';
+import { extractionExcerpts } from '../web/src/extraction-excerpts.js';
 
 const draft = analysisSchema.parse(
   JSON.parse(readFileSync('docs/samples/analysis-example.json', 'utf8')),
@@ -74,7 +75,7 @@ test('room detail locates only supported spans, including an address correction 
       200,
     );
     const correction =
-      '[고객] 101호 말고 202호로요. 010-0000-1001\n[고객] 입금자: 샘플하나';
+      '[고객] 101호 말고 202 호로요. 010-0000-1001\n[고객] 입금자: 샘플하나';
     receive('corrected', correction);
     const corrected = begin('corrected');
     assert.deepEqual(await read(), []);
@@ -86,7 +87,7 @@ test('room detail locates only supported spans, including an address correction 
         ...draft,
         recipient: {
           ...draft.recipient,
-          address_raw: '가상시 예시구 샘플동 202호',
+          address_raw: '가상시예시구샘플동202호',
           postal_code: '12345',
         },
       },
@@ -114,8 +115,8 @@ test('room detail locates only supported spans, including an address correction 
       [
         'order_draft.recipient.address_raw',
         'corrected',
-        '202호',
-        correction.indexOf('202호'),
+        '202 호',
+        correction.indexOf('202 호'),
       ],
       [
         'order_draft.depositor_name',
@@ -158,4 +159,36 @@ test('room detail locates only supported spans, including an address correction 
   } finally {
     store.close();
   }
+});
+
+test('address preview presents all verified excerpts from separate messages in source order', () => {
+  const field = 'order_draft.recipient.address_raw';
+  const original = '🌿 가상시 예시구 샘플동 101호';
+  const correction = '101호 말고 202 호로요.';
+  const messages = [
+    { id: 'original', role: 'customer', text: original },
+    { id: 'correction', role: 'customer', text: correction },
+  ];
+  const sources = [
+    {
+      field,
+      message_id: 'original',
+      start: original.indexOf('가상시'),
+      end: original.indexOf('101호'),
+    },
+    {
+      field,
+      message_id: 'correction',
+      start: correction.indexOf('202 호'),
+      end: correction.indexOf('로요'),
+    },
+  ] as const;
+  assert.deepEqual(
+    extractionExcerpts(messages, sources, field).map(({ text }) => text),
+    ['가상시 예시구 샘플동 ', '202 호'],
+  );
+  assert.deepEqual(
+    extractionExcerpts(messages.slice(0, 1), sources, field),
+    [],
+  );
 });

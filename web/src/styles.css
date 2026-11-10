@@ -2590,3 +2590,33 @@ h3 {
   font: inherit;
   font-size: 0.75rem;
 }
+
+.source-preview-value,
+.source-preview dd {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.source-preview-value {
+  font-weight: 600;
+}
+.source-preview dl {
+  display: grid;
+  gap: var(--space-sm);
+  margin: var(--space-md) 0 0;
+}
+.source-preview dl > div {
+  padding: var(--space-sm);
+  border: 1px solid var(--color-rule);
+  border-radius: var(--radius-md);
+}
+.source-preview dt {
+  color: var(--color-muted);
+  font-size: 0.75rem;
+}
+.source-preview dd {
+  margin: 0.25rem 0 0;
+}
+.source-preview mark {
+  background: var(--color-accent-soft);
+  color: var(--color-ink);
+}

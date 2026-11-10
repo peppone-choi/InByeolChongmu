@@ -56,6 +56,7 @@ import { api } from './api';
 import { ResourceEditor } from './ResourceEditor';
 import { ToolProgress } from './ToolProgress';
 import { ExtractionText, extractionLabels } from './ExtractionText';
+import { extractionExcerpts } from './extraction-excerpts';
 import type { ExtractionField } from '../../src/domain/http-contract.js';
 import { BatchPanel } from './BatchPanel';
 import './tokens.css';
@@ -153,7 +154,9 @@ export default function App() {
     [copyState, setCopyState] = useState<
       'idle' | 'loading' | 'success' | 'error' | 'unverified'
     >('idle');
-  const [modal, setModal] = useState<'new' | 'batch' | 'about' | null>(null),
+  const [modal, setModal] = useState<
+      'new' | 'batch' | 'about' | 'source' | null
+    >(null),
     [formError, setFormError] = useState('');
   const dialogRef = useRef<HTMLDialogElement>(null),
     returnFocus = useRef<HTMLElement | null>(null),
@@ -163,8 +166,25 @@ export default function App() {
     requestId: string;
     field: ExtractionField;
   } | null>(null);
+  const [sourcePreview, setSourcePreview] = useState<{
+    requestId: string;
+    field: ExtractionField;
+    value: string;
+  } | null>(null);
   const active = items.find((item) => item.id === activeId) ?? items[0];
   const editId = active?.requestId ?? '';
+  const preview =
+    modal === 'source' && sourcePreview?.requestId === editId
+      ? sourcePreview
+      : null;
+  const excerpts =
+    preview && active
+      ? extractionExcerpts(
+          active.messages,
+          active.extractionSources,
+          preview.field,
+        )
+      : [];
   const draft = active ? (edited[editId] ?? active.draft ?? '') : '';
   const pending = active ? state.pending[active.id] : undefined;
   const currentLatest = active ? state.details[active.id]?.latest : null;
@@ -193,16 +213,23 @@ export default function App() {
 
   const sourceLink = (field: ExtractionField, value: string | null) => {
     if (!value) return null;
-    if (!active?.extractionSources.some((source) => source.field === field))
-      return <span className="inline-note">원문 위치 미확인</span>;
+    const count =
+      active?.extractionSources.filter((source) => source.field === field)
+        .length ?? 0;
+    if (!count) return <span className="inline-note">원문 위치 미확인</span>;
     return (
       <button
         type="button"
         className="source-link"
         aria-label={extractionLabels[field] + ' 원문 보기'}
         onClick={() => {
-          setMobilePane('conversation');
-          setSourceJump({ requestId: editId, field });
+          if (count > 1) {
+            setSourcePreview({ requestId: editId, field, value });
+            setModal('source');
+          } else {
+            setMobilePane('conversation');
+            setSourceJump({ requestId: editId, field });
+          }
         }}
       >
         원문 보기
@@ -1490,7 +1517,11 @@ export default function App() {
               ? '일괄 DM 처리'
               : modal === 'new'
                 ? 'DM 추가'
-                : '이 화면에서 할 수 있는 일'}
+                : modal === 'source'
+                  ? preview
+                    ? extractionLabels[preview.field] + ' 원문'
+                    : '원문 보기'
+                  : '이 화면에서 할 수 있는 일'}
           </h2>
           <button
             className="icon-button"
@@ -1500,7 +1531,34 @@ export default function App() {
             <X size={20} />
           </button>
         </header>
-        {modal === 'batch' ? (
+        {modal === 'source' ? (
+          preview && excerpts.length ? (
+            <div className="source-preview">
+              <p className="small muted">
+                추출된 {extractionLabels[preview.field]}
+              </p>
+              <p className="source-preview-value">{preview.value}</p>
+              <dl>
+                {excerpts.map((excerpt, index) => (
+                  <div key={excerpt.message_id + ':' + excerpt.start}>
+                    <dt>
+                      {preview.field === 'order_draft.recipient.address_raw'
+                        ? index === excerpts.length - 1
+                          ? '새 동·호·층'
+                          : '유지된 주소'
+                        : '원문 구간 ' + (index + 1)}
+                    </dt>
+                    <dd>
+                      <mark>{excerpt.text}</mark>
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+            </div>
+          ) : (
+            <p className="muted">원문 위치 미확인</p>
+          )
+        ) : modal === 'batch' ? (
           <BatchPanel
             timeout={(state.health?.agent_timeout_ms ?? 60000) + 15000}
             onChanged={() => workspace.reloadRooms()}

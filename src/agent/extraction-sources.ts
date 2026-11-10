@@ -79,6 +79,35 @@ function locateValue(
   return candidates.length === 1 ? candidates[0] : undefined;
 }
 
+function indexAddress(segment: Segment) {
+  let compact = '';
+  const offsets: number[] = [];
+  for (const chunk of segment.text.matchAll(/\S+/gu)) {
+    compact += chunk[0];
+    for (let i = 0; i < chunk[0].length; i++) offsets.push(chunk.index! + i);
+  }
+  const range = (start: number, length: number): Range => ({
+    start: offsets[start]!,
+    end: offsets[start + length - 1]! + 1,
+  });
+  function find(value: string, before = compact.length) {
+    for (
+      let start = compact.lastIndexOf(value, before - value.length);
+      start >= 0 && start + value.length <= before;
+      start = start > 0 ? compact.lastIndexOf(value, start - 1) : -1
+    ) {
+      const hit = range(start, value.length);
+      const after = segment.text.slice(hit.end);
+      if (
+        !wordEnd.test(segment.text.slice(0, hit.start)) &&
+        (!wordStart.test(after) || particle.test(after))
+      )
+        return { start, range: hit };
+    }
+  }
+  return { segment, compact, range, find };
+}
+
 function locateAddress(segments: Segment[], value: string): Hit[] {
   if (
     !addressFromCustomer(
@@ -87,47 +116,52 @@ function locateAddress(segments: Segment[], value: string): Hit[] {
     )
   )
     return [];
-  for (let index = segments.length - 1; index >= 0; index--) {
-    const segment = segments[index]!;
+  const address = value.replace(/\s+/gu, '');
+  const indexed = segments.map(indexAddress);
+  const units = [...address.matchAll(/\d+(?:동|호|층)/gu)];
+  for (let index = indexed.length - 1; index >= 0; index--) {
+    const current = indexed[index]!;
+    const direct = current.find(address);
     const corrections = [
-      ...segment.text.matchAll(
-        /(\d+(?:동|호|층))\s*말고\s*(\d+(?:동|호|층))/dgu,
-      ),
+      ...current.compact.matchAll(/(\d+(?:동|호|층))말고(\d+(?:동|호|층))/dgu),
     ].reverse();
-    const direct = matches(segment.text, literal(value), true).at(-1);
     for (const correction of corrections) {
       const [, from, to] = correction;
       if (!from || !to || from.at(-1) !== to.at(-1)) continue;
-      const [start, end] = correction.indices![2]!;
-      if (direct && direct.index! > end) break;
-      // A corrected address can cite its original prefix/suffix and the new unit.
-      if (matches(value, literal(from)).length) return [];
-      const units = matches(value, literal(to));
-      if (units.length !== 1) continue;
-      const [unitStart, unitEnd] = units[0]!.indices![0]!;
-      const pattern = `(${literal(value.slice(0, unitStart))})${literal(from)}(${literal(value.slice(unitEnd))})`;
+      const [newStart, newEnd] = correction.indices![2]!;
+      if (direct && direct.start >= newEnd) break;
+      if (units.some(([unit]) => unit === from)) return [];
+      const replaced = units.filter(([unit]) => unit === to);
+      if (replaced.length !== 1) continue;
+      const unitStart = replaced[0]!.index!;
+      const original =
+        address.slice(0, unitStart) +
+        from +
+        address.slice(unitStart + to.length);
       for (let previous = index; previous >= 0; previous--) {
-        const base = segments[previous]!;
-        const text =
-          previous === index
-            ? base.text.slice(0, correction.index!)
-            : base.text;
-        const source = matches(text, pattern, true).at(-1);
+        const base = indexed[previous]!;
+        const source = base.find(
+          original,
+          previous === index ? correction.index : undefined,
+        );
         if (!source) continue;
-        const hits = source
-          .indices!.slice(1)
-          .flatMap((range) =>
-            range && range[0] < range[1]
-              ? [{ segment: base, range: { start: range[0], end: range[1] } }]
-              : [],
-          );
-        return [...hits, { segment, range: { start, end } }];
+        // Map the unchanged pieces back to the raw text and omit the superseded unit.
+        const old = base.range(source.start + unitStart, from.length);
+        return [
+          ...[
+            { start: source.range.start, end: old.start },
+            { start: old.end, end: source.range.end },
+          ]
+            .filter(({ start, end }) => start < end)
+            .map((range) => ({ segment: base.segment, range })),
+          {
+            segment: current.segment,
+            range: current.range(newStart, to.length),
+          },
+        ];
       }
     }
-    if (direct) {
-      const [start, end] = direct.indices![0]!;
-      return [{ segment, range: { start, end } }];
-    }
+    if (direct) return [{ segment: current.segment, range: direct.range }];
   }
   return [];
 }

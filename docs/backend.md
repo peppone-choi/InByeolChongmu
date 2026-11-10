@@ -108,7 +108,7 @@ SQLite의 `sources`, `records`는 판매자와 자료 종류로 구분합니다.
 - `POST /api/conversations`: `{ "customer_handle":"@sample.hana", "context_label":"가디건 주문" }` → `201`, `{conversation}`.
 - `GET /api/conversations?customer_handle=@sample.hana`: 고객별 방 목록과 최신 요청의 요약 상태·유형·미리보기. 필터가 없으면 최근 생성 순으로 최대 100개.
 - `GET /api/conversations/:id`: 방·최근 200메시지·최신 요청 ID/텍스트·실행 당시 스냅샷·실행 상태·분석·안전한 도구 진행 기록과 `extraction_sources`. 새로고침 복원과 2초 폴링에 사용합니다. 모델 호출을 시작하지 않습니다.
-- `extraction_sources`는 최신 성공 분석에 대해 서버가 계산한 `{field,message_id,start,end}` 배열입니다. `start`부터 `end` 직전까지의 UTF-16 오프셋은 응답의 `messages[].text`에 적용합니다. 분석 당시 기록과 동일한 고객 발화만 사용하며 붙여넣은 판매자 대사도 제외합니다. 수령인·연락처·주소·우편번호·입금자명을 대조합니다. 동·호·층 정정은 유지된 주소 부분과 새 단위의 구간을 별도로 반환합니다. 일치 위치를 결정할 수 없는 값에는 구간을 제공하지 않습니다. 기존 분석도 저장된 입력과 메시지로 계산합니다.
+- `extraction_sources`는 최신 성공 분석에 대해 서버가 계산한 `{field,message_id,start,end}` 배열입니다. `start`부터 `end` 직전까지의 UTF-16 오프셋은 응답의 `messages[].text`에 적용합니다. 분석 당시 기록과 동일한 고객 발화만 사용하며 붙여넣은 판매자 대사도 제외합니다. 수령인·연락처·주소·우편번호·입금자명을 대조합니다. 동·호·층 정정은 띄어쓰기를 무시하고 대조한 뒤, 유지된 주소 부분과 새 단위의 원문 구간을 순서대로 반환합니다. 웹의 원문 보기는 이 구간들을 함께 표시합니다. 일치 위치를 결정할 수 없는 값에는 구간을 제공하지 않습니다. 기존 분석도 저장된 입력과 메시지로 계산합니다.
 - `GET /api/conversations/:id/messages`: 해당 방의 최근 메시지.
 - `POST /api/chat`: 아래 형식으로 수신하고 `{conversation_id,replayed,analysis,execution?}` 반환. `execution`은 실행 ID·Flue 모델 호출 수·도구 호출 ID·이름/성공 여부·running/succeeded/failed 상태를 포함하고 공급자 원문·키는 포함하지 않습니다.
 
