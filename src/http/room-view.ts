@@ -1,6 +1,7 @@
 import type { Store } from '../storage/store.js';
 import type { RoomDetail, RoomSummary } from '../domain/http-contract.js';
 import { executionView } from '../agent/run-view.js';
+import { extractionSources } from '../agent/extraction-sources.js';
 export function roomDetail(
   store: Store,
   seller: string,
@@ -9,9 +10,11 @@ export function roomDetail(
   const conversation = store.conversation(seller, id),
     message = store.latestMessage(seller, id);
   const run = message ? store.runForRequest(seller, message.request_id) : null;
+  const messages = store.messages(seller, id);
   return {
     conversation,
-    messages: store.messages(seller, id),
+    messages,
+    extraction_sources: run ? extractionSources(run, messages) : [],
     latest: message
       ? {
           request_id: message.request_id,
