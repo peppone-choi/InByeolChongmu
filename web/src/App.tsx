@@ -35,6 +35,7 @@ import {
   PanelRightOpen,
   Layers2,
   LockKeyhole,
+  ListChecks,
 } from 'lucide-react';
 import {
   conversations,
@@ -42,6 +43,7 @@ import {
   statusLabels,
   money,
   needsAttention,
+  reviewRank,
   type Conversation,
   type Category,
   type Page,
@@ -53,6 +55,7 @@ import { DataManagement } from './DataManagement';
 import { api } from './api';
 import { ResourceEditor } from './ResourceEditor';
 import { ToolProgress } from './ToolProgress';
+import { BatchPanel } from './BatchPanel';
 import './tokens.css';
 import './styles.css';
 type Preferences = { largeText: boolean; showEvidence: boolean };
@@ -148,7 +151,7 @@ export default function App() {
     [copyState, setCopyState] = useState<
       'idle' | 'loading' | 'success' | 'error' | 'unverified'
     >('idle');
-  const [modal, setModal] = useState<'new' | 'about' | null>(null),
+  const [modal, setModal] = useState<'new' | 'batch' | 'about' | null>(null),
     [formError, setFormError] = useState('');
   const dialogRef = useRef<HTMLDialogElement>(null),
     returnFocus = useRef<HTMLElement | null>(null),
@@ -168,16 +171,22 @@ export default function App() {
 
   const currentId = useRef(active?.id);
   currentId.current = active?.id;
-  const visible = items.filter(
-    (item) =>
-      (category === 'all' ||
-        (category === 'attention'
-          ? needsAttention(item)
-          : item.status === 'ready_for_review')) &&
-      `${item.name} ${item.handle} ${item.subject}`
-        .toLocaleLowerCase()
-        .includes(search.toLocaleLowerCase()),
-  );
+  const visible = items
+    .filter(
+      (item) =>
+        (category === 'all' ||
+          (category === 'attention'
+            ? needsAttention(item)
+            : item.status === 'ready_for_review')) &&
+        `${item.name} ${item.handle} ${item.subject}`
+          .toLocaleLowerCase()
+          .includes(search.toLocaleLowerCase()),
+    )
+    .sort(
+      (a, b) =>
+        reviewRank(a.classification, needsAttention(a)) -
+        reviewRank(b.classification, needsAttention(b)),
+    );
   const attentionCount = items.filter(needsAttention).length;
   useEffect(() => {
     document.title = `${page === 'inbox' ? 'DM 검토' : page === 'resources' ? '상품·정책' : page === 'orders' ? '주문' : '설정'} · 인별총무`;
@@ -431,10 +440,14 @@ export default function App() {
                   <h1>DM 검토</h1>
                   <p>대화를 살펴보고, 답장을 준비하세요.</p>
                 </div>
-                <Button onClick={() => setModal('new')}>
-                  <Plus size={20} />
-                  DM 추가
-                </Button>
+                <div className="inbox-actions">
+                  <Button onClick={() => setModal('batch')}>
+                    <ListChecks size={18} /> 일괄 DM
+                  </Button>
+                  <Button onClick={() => setModal('new')}>
+                    <Plus size={20} /> DM 추가
+                  </Button>
+                </div>
               </div>
               <div className={`workbench pane-${mobilePane}`}>
                 <section className="conversation-list" aria-label="대화 목록">
@@ -1106,6 +1119,46 @@ export default function App() {
                             )}
                           </div>
                         )}
+                        {active.analysis?.payment_claim && (
+                          <div className="detail-section">
+                            <h3>고객이 말한 입금</h3>
+                            <p>
+                              입금자명:{' '}
+                              {active.analysis.payment_claim.depositor_name ??
+                                '원문에서 확인되지 않음'}
+                            </p>
+                            <p className="small muted">
+                              고객이 입금했다고 말했습니다. 실제 입금은 판매자가
+                              확인하세요.
+                            </p>
+                          </div>
+                        )}
+                        {!!active.analysis?.order_candidates.length && (
+                          <div className="detail-section">
+                            <h3>
+                              <Package size={16} />
+                              조회한 주문 후보
+                            </h3>
+                            <p className="small muted">
+                              주문 화면에서 고객과 주문 정보를 대조하세요.
+                            </p>
+                            <div className="data-actions">
+                              {[
+                                ...new Set(active.analysis.order_candidates),
+                              ].map((id) => (
+                                <Button
+                                  key={id}
+                                  onClick={() => {
+                                    setOrderId(id);
+                                    setPage('orders');
+                                  }}
+                                >
+                                  주문 {id} 확인
+                                </Button>
+                              ))}
+                            </div>
+                          </div>
+                        )}
                         {preferences.showEvidence && (
                           <div className="detail-section evidence-section">
                             <h3>
@@ -1327,7 +1380,7 @@ export default function App() {
       </div>
       <dialog
         ref={dialogRef}
-        className="dialog"
+        className={modal === 'batch' ? 'dialog batch-dialog' : 'dialog'}
         onCancel={() => setModal(null)}
         onClose={() => {
           if (modal) setModal(null);
@@ -1348,7 +1401,11 @@ export default function App() {
       >
         <header>
           <h2 id="dialog-title">
-            {modal === 'new' ? 'DM 추가' : '이 화면에서 할 수 있는 일'}
+            {modal === 'batch'
+              ? '일괄 DM 처리'
+              : modal === 'new'
+                ? 'DM 추가'
+                : '이 화면에서 할 수 있는 일'}
           </h2>
           <button
             className="icon-button"
@@ -1358,7 +1415,16 @@ export default function App() {
             <X size={20} />
           </button>
         </header>
-        {modal === 'new' ? (
+        {modal === 'batch' ? (
+          <BatchPanel
+            timeout={(state.health?.agent_timeout_ms ?? 60000) + 15000}
+            onChanged={() => workspace.reloadRooms()}
+            onOpenRoom={(id) => {
+              setModal(null);
+              selectItem(id);
+            }}
+          />
+        ) : modal === 'new' ? (
           <form
             onSubmit={(event) => void addDM(event)}
             onChange={() => {

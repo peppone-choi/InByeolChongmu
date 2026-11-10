@@ -148,6 +148,13 @@ export const analysisSchema = z
     order_candidates: z.array(id),
     product_candidates: z.array(id),
     matched_skus: z.array(id),
+    payment_claim: z
+      .object({
+        depositor_name: z.string().max(80).nullable(),
+        customer_claimed_paid: z.literal(true),
+      })
+      .strict()
+      .optional(),
     order_draft: z
       .object({
         customer_handle: id,

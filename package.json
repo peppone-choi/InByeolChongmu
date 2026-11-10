@@ -25,7 +25,8 @@
     "verify:agent": "tsx src/cli/verify-agent.ts",
     "web:dev": "vite web --config web/vite.config.ts",
     "web:build": "tsc -p web/tsconfig.json && vite build web --config web/vite.config.ts",
-    "web:preview": "vite preview web --config web/vite.config.ts"
+    "web:preview": "vite preview web --config web/vite.config.ts",
+    "eval:agent": "tsx src/cli/evaluate-agent.ts"
   },
   "dependencies": {
     "@earendil-works/pi-ai": "1.1.0",
