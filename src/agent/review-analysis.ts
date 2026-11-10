@@ -6,7 +6,11 @@ import {
 } from '../domain/schema.js';
 import type { Store } from '../storage/store.js';
 import type { AgentRun } from './types.js';
-import { customerTexts, paymentStatement } from './customer-text.js';
+import {
+  customerTexts,
+  hasPaymentQuestion,
+  paymentStatement,
+} from './customer-text.js';
 
 const messages = {
   PRODUCT_UNRESOLVED: '문의한 상품의 이름이나 게시물을 확인해 주세요.',
@@ -67,6 +71,22 @@ export function prepareReview(
     return raw;
   const analysis = parsed.data;
   delete analysis.payment_claim;
+  const latestText = customerTexts(run.input, true).join('\n');
+  const statement = paymentStatement([latestText]);
+  if (!statement && hasPaymentQuestion(latestText)) {
+    if (analysis.classification === 'payment_claim') {
+      analysis.classification = 'order_lookup';
+      analysis.status = 'human_review';
+      analysis.reply_draft = null;
+      analysis.order_draft = null;
+      analysis.review_items = analysis.review_items.filter(
+        ({ code }) =>
+          code !== 'PAYMENT_MISMATCH' && code !== 'MANUAL_PAYMENT_CHECK',
+      );
+    } else if (analysis.order_draft) {
+      analysis.order_draft.customer_claimed_paid = false;
+    }
+  }
   const add = (code: ReviewCode) => {
     if (!analysis.review_items.some((item) => item.code === code))
       analysis.review_items.push({ code, message: messages[code] });
@@ -94,7 +114,6 @@ export function prepareReview(
   if (inquiry && !analysis.order_candidates.length && knownOrders.size === 1)
     analysis.order_candidates = [...knownOrders.keys()];
   const text = customerTexts(run.input).join('\n');
-  const latestText = customerTexts(run.input, true).join('\n');
   const payment = existingPaymentClaim(latestText);
   const scoped =
     knownOrders.size === 1 ? [...knownOrders.values()][0] : undefined;
@@ -113,10 +132,8 @@ export function prepareReview(
     analysis.classification = 'payment_claim';
   const crossAccount = orders.filter(({ review_only }) => review_only);
   if (payment && crossAccount.length) analysis.classification = 'payment_claim';
-  if (analysis.classification === 'payment_claim') {
-    const statement = paymentStatement(customerTexts(run.input, true));
-    if (statement) analysis.payment_claim = statement;
-  }
+  if (analysis.classification === 'payment_claim' && statement)
+    analysis.payment_claim = statement;
   if (crossAccount.length) {
     const ids = crossAccount.flatMap(({ records }) =>
       z

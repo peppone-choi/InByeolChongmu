@@ -5,7 +5,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { z } from 'zod';
-import { batchViewSchema, type BatchItem } from '../src/domain/batch.js';
+import {
+  batchListSchema,
+  batchViewSchema,
+  type BatchItem,
+} from '../src/domain/batch.js';
 import { emptyAnalysis } from '../src/domain/schema.js';
 import { AppError } from '../src/domain/errors.js';
 import type { AgentRunner } from '../src/agent/types.js';
@@ -27,6 +31,72 @@ const samples = z
     ),
   })
   .parse(JSON.parse(readFileSync('docs/samples/dm-cases.json', 'utf8')));
+
+test('batch list keeps older unfinished work beyond the newest 50 receipts', async () => {
+  const store = new Store(':memory:');
+  try {
+    const config = readConfig(process.cwd(), {
+      NODE_ENV: 'test',
+      DATABASE_PATH: ':memory:',
+      AGENT_BACKEND: 'disabled',
+      OPENAI_API_KEY: '',
+      TYPESAFE_API_KEY: '',
+      LOCAL_API_TOKEN: '',
+    });
+    const seller = config.sellerId;
+    const create = (owner = seller) =>
+      store.batches.create(owner, {
+        batch_id: randomUUID(),
+        items: [
+          { customer_handle: '@sample', context_label: '', text: '문의' },
+        ],
+      });
+    const start = () => {
+      const { batch_id, items } = create();
+      const { item_id, request_id } = items[0]!;
+      store.batches.claim(seller, batch_id, item_id, request_id, false);
+      return { batch_id, item_id, request_id };
+    };
+    const finish = (retryable?: boolean) => {
+      const { batch_id, item_id, request_id } = start();
+      store.batches.finish(batch_id, item_id, request_id, {
+        classification: null,
+        analysis_status: null,
+        needs_attention: retryable !== undefined,
+        error:
+          retryable === undefined
+            ? null
+            : { code: 'TEST', message: '테스트 오류', retryable },
+      });
+      return batch_id;
+    };
+    const queued = create().batch_id;
+    const running = start().batch_id;
+    const retryable = finish(true);
+    const finalFailure = finish(false);
+    const completed = finish();
+    const recent = Array.from({ length: 50 }, () => finish());
+    const otherSeller = create('different-seller').batch_id;
+    const app = createApp(store, config);
+    const response = await app.request('/api/dm-batches');
+    assert.equal(response.status, 200);
+    const ids = batchListSchema
+      .parse(await response.json())
+      .batches.map(({ batch_id }) => batch_id);
+    assert.deepEqual(ids, [...recent.toReversed(), retryable, running, queued]);
+    for (const hidden of [finalFailure, completed, otherSeller])
+      assert.ok(!ids.includes(hidden));
+    const detail = await app.request('/api/dm-batches/' + queued);
+    assert.equal(detail.status, 200);
+    assert.equal(
+      batchViewSchema.parse(await detail.json()).items[0]?.status,
+      'queued',
+    );
+    assert.equal(store.batches.export(seller).length, 55);
+  } finally {
+    store.close();
+  }
+});
 
 test('AC-15: durable mixed batch isolates rooms, continues after failures and retries one item', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'inbyeol-batch-'));

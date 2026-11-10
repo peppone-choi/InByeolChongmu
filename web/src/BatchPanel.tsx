@@ -97,12 +97,10 @@ export function BatchPanel({
     const { items: _, ...summary } = next;
     void _;
     setBatch(next);
-    setList((current) =>
-      [
-        summary,
-        ...current.filter(({ batch_id }) => batch_id !== summary.batch_id),
-      ].slice(0, 50),
-    );
+    setList((current) => [
+      summary,
+      ...current.filter(({ batch_id }) => batch_id !== summary.batch_id),
+    ]);
   }
   async function save() {
     const body = submitting ?? {

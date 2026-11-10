@@ -226,6 +226,40 @@ test('DM-018/029: a verified pending order adds order evidence and distinguishes
   );
 });
 
+test('payment questions do not create a payment claim even when the model classifies them as one', () => {
+  for (const question of [
+    '입금했어요?',
+    '입금했어?',
+    '송금했죠?',
+    '입금했습니까?',
+    '입금 완료인가요?',
+    '34,000원 보냈어요？',
+    '샘플입금 명의로 34000 보냈어요?',
+    '입금했는지 확인해 주세요.',
+  ]) {
+    assert.equal(paymentStatement([question]), undefined, question);
+  }
+  withReview(
+    '@sample.pending',
+    '34,000원 보냈어요?',
+    'payment_claim',
+    (result) => {
+      assert.equal(result.classification, 'order_lookup');
+      assert.equal(result.payment_claim, undefined);
+      assert.equal(result.status, 'human_review');
+    },
+    true,
+  );
+  assert.deepEqual(
+    paymentStatement(['샘플입금 명의로 34000 보냈어요. 확인됐나요?']),
+    { depositor_name: '샘플입금', customer_claimed_paid: true },
+  );
+  assert.deepEqual(
+    paymentStatement(['입금했어요. 샘플입금 명의로 34000 보냈어요?']),
+    { depositor_name: null, customer_claimed_paid: true },
+  );
+});
+
 test('DM-028: foreign order is an ID-only candidate and payment details come only from the latest customer text', () => {
   const store = new Store(':memory:');
   try {

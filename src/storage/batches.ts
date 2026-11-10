@@ -48,9 +48,16 @@ export class Batches {
     return this.db
       .prepare(
         summaries +
-          ' GROUP BY b.id ORDER BY b.created_at DESC,b.rowid DESC LIMIT ?',
+          ` GROUP BY b.id HAVING
+          MAX(i.status IN ('queued','running') OR
+            (i.status='failed' AND json_extract(i.outcome, '$.error.retryable')=1))
+          OR b.id IN (
+            SELECT id FROM dm_batches WHERE seller_id=?
+            ORDER BY created_at DESC,rowid DESC LIMIT ?
+          )
+          ORDER BY b.created_at DESC,b.rowid DESC`,
       )
-      .all(seller, limit)
+      .all(seller, seller, limit)
       .map((row) => batchSummarySchema.parse(row));
   }
   get(seller: string, id: string) {

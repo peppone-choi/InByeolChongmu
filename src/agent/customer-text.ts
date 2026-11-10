@@ -31,17 +31,26 @@ export function mentionsRecipient(text: string, name: string): boolean {
   ).test(text.normalize('NFKC').toLocaleLowerCase('ko'));
 }
 
+const paymentMention =
+  /(?:입금|송금)\s*(?:은\s*)?(?:못\s*했|안\s*했|아직|전이|했|햇|드렸|완료)|(?:[\d,]{4,}(?:\s*원)?|이름으로|명의로)\s*(?:넣었|보냈)/gu;
+
+function isPaymentQuestion(text: string, match: RegExpMatchArray): boolean {
+  const ending = text.slice(match.index! + match[0].length);
+  return /^(?:나요|는지|는가|습니까|인가요|인지|일까요|을까요|을까|(?:어(?:요|용)?|아요|지(?:요)?|죠|요|습니다|음)?[ \t]*[?？])/u.test(
+    ending,
+  );
+}
+
+export function hasPaymentQuestion(text: string): boolean {
+  for (const match of text.matchAll(paymentMention))
+    if (isPaymentQuestion(text, match)) return true;
+  return false;
+}
+
 export function paymentStatement(texts: readonly string[]) {
   const text = texts.join('\n');
-  const asserted = (match: RegExpMatchArray) =>
-    !/^(?:나요|는지|는가|습니까|죠\s*\?|\s*\?)/u.test(
-      text.slice(match.index! + match[0].length),
-    );
-  const statements = [
-    ...text.matchAll(
-      /(?:입금|송금)\s*(?:은\s*)?(?:못\s*했|안\s*했|아직|전이|했|햇|드렸|완료)|(?:[\d,]{4,}(?:\s*원)?|이름으로|명의로)\s*(?:넣었|보냈)/gu,
-    ),
-  ].filter(asserted);
+  const asserted = (match: RegExpMatchArray) => !isPaymentQuestion(text, match);
+  const statements = [...text.matchAll(paymentMention)].filter(asserted);
   const last = statements.at(-1)?.[0];
   if (!last || /못\s*했|안\s*했|아직|전이/u.test(last)) return undefined;
   const names = [
