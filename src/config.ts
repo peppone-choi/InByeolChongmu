@@ -12,6 +12,8 @@ const configSchema = z.object({
     .enum(['development', 'test', 'production'])
     .default('development'),
   APP_DEPLOYMENT: z.enum(['local', 'container']).default('local'),
+  APP_PUBLIC_HOSTNAME: z.union([z.literal(''), z.hostname()]).default(''),
+  APP_PUBLIC_ACCESS: z.enum(['true', 'false']).default('false'),
   PORT: z.coerce.number().int().min(1).max(65535).default(3000),
   DATABASE_PATH: z.string().min(1).default('.local/inbyeol.sqlite'),
   SELLER_ID: z.string().min(1).max(100).default('sample-seller-01'),
@@ -65,6 +67,13 @@ export function readConfig(
     root: resolve(root),
     port: parsed.PORT,
     deployment: parsed.APP_DEPLOYMENT,
+    publicHostname:
+      parsed.APP_DEPLOYMENT === 'container'
+        ? parsed.APP_PUBLIC_HOSTNAME.toLowerCase()
+        : '',
+    publicAccess:
+      parsed.APP_DEPLOYMENT === 'container' &&
+      parsed.APP_PUBLIC_ACCESS === 'true',
     listenHost: parsed.APP_DEPLOYMENT === 'container' ? '0.0.0.0' : '127.0.0.1',
     sellerId: parsed.SELLER_ID,
     databasePath:
@@ -88,6 +97,7 @@ export function readConfig(
     historyCharacters: parsed.AGENT_HISTORY_CHARACTERS,
     credentials: {
       openai: !!values.OPENAI_API_KEY?.trim(),
+      anthropic: !!values.ANTHROPIC_API_KEY?.trim(),
       jev: !!values.TYPESAFE_API_KEY?.trim(),
       gateway:
         !!values.CLOUDFLARE_ACCOUNT_ID?.trim() &&
@@ -101,8 +111,8 @@ export function readConfig(
   environments.set(
     result,
     Object.fromEntries(
-      ['OPENAI_API_KEY', 'TYPESAFE_API_KEY'].flatMap((name) =>
-        values[name] ? [[name, values[name]!]] : [],
+      ['OPENAI_API_KEY', 'ANTHROPIC_API_KEY', 'TYPESAFE_API_KEY'].flatMap(
+        (name) => (values[name] ? [[name, values[name]!]] : []),
       ),
     ),
   );

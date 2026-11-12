@@ -1,6 +1,6 @@
 # 백엔드와 자료 도구
 
-현재 구현은 가상 자료용 백엔드와 실제 모델 실행 경로입니다. Hono → ChatService → Flue → OpenAI → 자료 도구 → 검증된 분석 JSON 순서로 동작합니다. TypeSafe 키가 있으면 Jev 분류를 에이전트 도구로 연결합니다. Docker 단일 서버 실행을 지원합니다.
+현재 구현은 가상 자료용 백엔드와 실제 모델 실행 경로입니다. Hono → ChatService → Flue → OpenAI 또는 Claude → 자료 도구 → 검증된 분석 JSON 순서로 동작합니다. TypeSafe 키가 있으면 Jev 분류를 에이전트 도구로 연결합니다. Docker 단일 서버 실행을 지원합니다.
 
 ## 실행 환경과 명령
 
@@ -13,7 +13,7 @@ npm run db:seed
 npm run dev
 ```
 
-이미 `.env.local`이 있으면 복사로 덮어쓰지 마세요. `.env.local` → `.env` 순서로 읽고, 셸 환경 변수가 최종 우선입니다. 필요한 키 이름은 `.env.example`에만 빈 값으로 제공합니다. 실제 환경 파일은 Git에서 제외합니다. `AGENT_BACKEND=flue`, `AGENT_MODEL=openai/gpt-5.5`, `OPENAI_API_KEY`를 설정하면 실제 모델을 호출합니다. 기본 `disabled`는 모델을 호출하지 않습니다. `TYPESAFE_API_KEY`를 넣으면 `TYPESAFE_MODEL=jev-latest` 분류 도구를 추가합니다. 키 변경 후 프로세스를 재시작하세요. Provider 키는 앱 설정 JSON·에이전트 입력·Flue env에 전달하지 않고 메모리의 인증 함수에서만 읽습니다.
+이미 `.env.local`이 있으면 복사로 덮어쓰지 마세요. `.env.local` → `.env` 순서로 읽고, 셸 환경 변수가 최종 우선입니다. 필요한 키 이름은 `.env.example`에만 빈 값으로 제공합니다. 실제 환경 파일은 Git에서 제외합니다. `AGENT_BACKEND=flue`, `AGENT_MODEL=openai/gpt-5.5`, `OPENAI_API_KEY`를 설정하면 실제 모델을 호출합니다. Claude는 `AGENT_MODEL=anthropic/claude-sonnet-4-6`과 `ANTHROPIC_API_KEY`를 사용합니다. 기본 `disabled`는 모델을 호출하지 않습니다. `TYPESAFE_API_KEY`를 넣으면 `TYPESAFE_MODEL=jev-latest` 분류 도구를 추가합니다. 키 변경 후 로컬 프로세스를 재시작하거나 Docker에서 `docker compose up -d --force-recreate api`를 실행하세요. Provider 키는 앱 설정 JSON·에이전트 입력·Flue env에 전달하지 않고 메모리의 인증 함수에서만 읽습니다.
 
 - `npm run build` / `npm start`: 컴파일 / 컴파일된 HTTP 서버 실행.
 - `npm run typecheck`, `npm run lint`, `npm run format:check`, `npm test`: 타입·린트·포맷·동작 검사.
@@ -103,6 +103,7 @@ SQLite의 `sources`, `records`는 판매자와 자료 종류로 구분합니다.
 - `PUT /api/resources/products/:id`: `{snapshot_id,product}`. 읽은 상품 스냅샷과 전체 상품 객체를 보내 기존 상품을 수정합니다. 상품 ID 변경은 거절하고 옵션 추가·삭제를 허용합니다. 필수값·숫자·중복·할인 호환성을 검증한 뒤 원자 저장합니다.
 - `PUT /api/resources/policies/:id`: `{snapshot_id,policy}`. 기존 정책 종류를 보존하고 수정합니다. 배송비·할인 각각 최대 1개, 실제 할인 상품·최소 수량·할인액을 검증합니다. 배송비/할인/출고일 문구는 입력된 구조화 값으로 생성해 문구와 계산을 일치시킵니다. 일반 정책 문구는 직접 편집합니다.
 - `GET /health`: 자료 서버 상태. `model_configured`와 `model_status`는 설정 유무만 표시하며 실제 공급자 접근 성공을 보증하지 않습니다. 모델 이름·실행 제한·TypeSafe 키 설정 여부만 추가로 반환하며 키 값은 포함하지 않습니다.
+- `POST /api/resources/draft`: 판매자와 인별총무의 등록 대화를 받아 추가 질문 또는 상품·정책 한 건의 등록 초안을 반환합니다. 같은 종류의 배송비나 상품 할인 정책이 있으면 수정 초안을 반환합니다. 판매 자료를 바꾸려면 기존 등록·수정 API에서 자료 버전과 입력을 다시 검증하고 저장합니다.
 - `GET /api/tools`: 허용 도구 목록·입력 JSON Schema.
 - `POST /api/tools/:name`: `{ "arguments": { ... }, "conversation_id": "선택 UUID" }`. 방이 있으면 해당 고객 범위의 주문만 조회합니다. 방 없는 호출은 로컬 판매자 관리용입니다.
 - `POST /api/conversations`: `{ "customer_handle":"@sample.hana", "context_label":"가디건 주문" }` → `201`, `{conversation}`.
@@ -193,9 +194,21 @@ Compose는 `NODE_ENV=production`, `APP_DEPLOYMENT=container`, `/app/.local/inbye
 
 앱 DB 온라인 백업은 기존 `db:backup` 명령을 사용합니다. 컨테이너 전체 복구용으로는 요청을 멈추고 `docker compose stop api` 후 볼륨의 두 DB와 남은 WAL/SHM을 함께 복사하세요. 새 빈 볼륨에 같은 소유권으로 복원하고 해당 Flue 버전으로 재실행합니다. 앱 DB만 복구하면 진행 중 Flue 실행을 이어갈 수 없으므로 완료된 기록 복구와 실행 복구를 구분하세요.
 
+### Cloudflare Tunnel
+
+Cloudflare에서 원격 관리 터널의 공개 호스트를 `http://api:3000`으로 연결합니다. Compose의 두 컨테이너는 같은 네트워크를 사용합니다. `.env.local`의 `APP_PUBLIC_HOSTNAME`에 HTTPS 공개 주소의 호스트명을 넣고, 터널 토큰은 Git과 Docker 이미지에서 제외되는 `.local/cloudflared-token`에 저장합니다.
+
+```powershell
+docker compose -f compose.yaml -f compose.tunnel.yaml up -d --build
+docker compose -f compose.yaml -f compose.tunnel.yaml stop cloudflared
+```
+
+기본값은 연결 암호를 요구하며 공개 호스트의 로그인 쿠키는 Secure로 발급됩니다. 외부 방문자가 링크로 바로 들어오는 데모는 `.env.local`에서 `APP_PUBLIC_ACCESS=true`를 설정합니다. 이 모드에서는 지정한 공개 호스트에서 누구나 앱과 API를 사용할 수 있습니다. 토큰이나 모델 설정을 바꿀 때는 API 서비스만 다시 생성합니다. 터널은 Docker가 실행 중일 때 연결됩니다.
+
+
 ## Cloudflare 설정 상태
 
-공식 [agent setup 지침](https://developers.cloudflare.com/agent-setup/prompt.md)에 따라 개발 환경의 Cloudflare 스킬·MCP 로그인·CLI 인증을 설정했습니다. 이는 저장소나 Docker 이미지에 로그인 토큰을 저장하는 절차가 아닙니다. 계정의 기본 AI Gateway를 확인했지만 저장된 BYOK 공급자 키는 없었습니다. 현재 앱은 OpenAI·TypeSafe 키를 env에서 직접 읽으며 Cloudflare MCP OAuth 토큰을 재사용하지 않습니다. Gateway용 변수는 예약된 설정이고 실제 추론 라우팅은 아직 연결하지 않았습니다.
+공식 [agent setup 지침](https://developers.cloudflare.com/agent-setup/prompt.md)에 따라 개발 환경의 Cloudflare 스킬·MCP 로그인·CLI 인증을 설정했습니다. 이는 저장소나 Docker 이미지에 로그인 토큰을 저장하는 절차가 아닙니다. 계정의 기본 AI Gateway를 확인했지만 저장된 BYOK 공급자 키는 없었습니다. 현재 앱은 OpenAI·Anthropic·TypeSafe 키를 env에서 직접 읽으며 Cloudflare MCP OAuth 토큰을 재사용하지 않습니다. Gateway용 변수는 예약된 설정이고 실제 추론 라우팅은 아직 연결하지 않았습니다.
 
 ## 웹 개발 프록시
 

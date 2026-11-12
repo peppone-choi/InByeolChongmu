@@ -1350,6 +1350,7 @@ export default function App() {
             <ResourceEditor
               resources={state.resources}
               onSaved={(resources) => workspace.acceptResources(resources)}
+              draftTimeout={(state.health?.agent_timeout_ms ?? 60000) + 15000}
             />
           )}
           {page === 'settings' && (

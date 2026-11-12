@@ -1,0 +1,18 @@
+services:
+  cloudflared:
+    image: cloudflare/cloudflared:2026.10.7
+    command: tunnel --no-autoupdate run --token-file /run/secrets/tunnel_token
+    depends_on:
+      - api
+    restart: unless-stopped
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    secrets:
+      - tunnel_token
+
+secrets:
+  tunnel_token:
+    file: .local/cloudflared-token

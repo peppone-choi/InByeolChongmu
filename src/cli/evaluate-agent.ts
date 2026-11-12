@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parseArgs, isDeepStrictEqual } from 'node:util';
 import { z } from 'zod';
-import { FlueRunner } from '../agent/flue-runner.js';
+import { FlueRunner, flueReadiness } from '../agent/flue-runner.js';
 import {
   evaluationDatasetSchema,
   evaluateResponse,
@@ -170,11 +170,7 @@ async function main() {
     return;
   }
   const config = values.live ? readConfig() : undefined;
-  const ready =
-    config &&
-    config.agentBackend === 'flue' &&
-    config.agentModel.startsWith('openai/') &&
-    config.credentials.openai;
+  const ready = config && flueReadiness(config).ready;
   const counts = { passed: 0, manual_review: 0, failed: 0, not_run: 0 };
   print({
     type: 'run',

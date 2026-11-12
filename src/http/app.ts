@@ -29,6 +29,8 @@ import { bodyLimit } from 'hono/body-limit';
 import { z } from 'zod';
 import type { Config } from '../config.js';
 import { AppError } from '../domain/errors.js';
+import { catalogDraftRequestSchema } from '../domain/catalog-draft.js';
+import { createCatalogDrafter } from '../agent/catalog-draft.js';
 import type { AgentRunner } from '../agent/types.js';
 import { ChatService } from '../agent/service.js';
 import { BatchService } from '../agent/batch-service.js';
@@ -53,14 +55,23 @@ export function createApp(
 ) {
   const app = new Hono();
   const sessions = new BrowserSessions(config.apiToken);
-  const authenticated = (request: Request, cookie: string | undefined) =>
-    sessions.authenticate(
+  const browserOrigin = (url: URL) =>
+    url.host === config.publicHostname ? 'https://' + url.host : url.origin;
+  const authenticated = (request: Request, cookie: string | undefined) => {
+    if (
+      config.publicAccess &&
+      new URL(request.url).host === config.publicHostname
+    )
+      return 'none';
+    return sessions.authenticate(
       request.headers.get('Authorization') ?? undefined,
       cookie,
     );
+  };
   const chat = new ChatService(store, config, options.runner, options.clock);
   const batches = new BatchService(store.batches, chat, config.sellerId);
   const imports = new WorkbookImports(store);
+  const draftCatalog = createCatalogDrafter(store, config);
   let maintenance = false;
   const requireWritable = () => {
     if (maintenance)
@@ -86,7 +97,7 @@ export function createApp(
         403,
       );
     const origin = c.req.header('Origin');
-    if (origin && origin !== url.origin)
+    if (origin && origin !== browserOrigin(url))
       throw new AppError(
         'ORIGIN_NOT_ALLOWED',
         '다른 출처의 요청은 허용하지 않습니다.',
@@ -142,14 +153,14 @@ export function createApp(
       );
     await next();
   });
-  app.get('/api/session', (c) =>
-    c.json({
-      authenticated:
-        authenticated(c.req.raw, getCookie(c, sessionCookie)) !== null,
-      authentication_required: !!config.apiToken,
-      method: authenticated(c.req.raw, getCookie(c, sessionCookie)),
-    }),
-  );
+  app.get('/api/session', (c) => {
+    const method = authenticated(c.req.raw, getCookie(c, sessionCookie));
+    return c.json({
+      authenticated: method !== null,
+      authentication_required: method !== 'none',
+      method,
+    });
+  });
   app.post('/api/session', async (c) => {
     const { token } = z
       .object({ token: z.string().min(1).max(1024) })
@@ -160,7 +171,7 @@ export function createApp(
     setCookie(c, sessionCookie, sessions.create(), {
       httpOnly: true,
       sameSite: 'Strict',
-      secure: new URL(c.req.url).protocol === 'https:',
+      secure: browserOrigin(new URL(c.req.url)).startsWith('https://'),
       path: '/',
       maxAge: sessionTtl,
     });
@@ -172,7 +183,10 @@ export function createApp(
   });
   app.delete('/api/session', (c) => {
     sessions.delete(getCookie(c, sessionCookie));
-    deleteCookie(c, sessionCookie, { path: '/' });
+    deleteCookie(c, sessionCookie, {
+      path: '/',
+      secure: browserOrigin(new URL(c.req.url)).startsWith('https://'),
+    });
     return c.body(null, 204);
   });
   app.get('/health', (c) =>
@@ -197,6 +211,14 @@ export function createApp(
     },
   });
   app.get('/api/resources', (c) => c.json(resources()));
+  app.post('/api/resources/draft', async (c) =>
+    c.json(
+      await draftCatalog(
+        catalogDraftRequestSchema.parse(await parseJson(c.req.raw)),
+        c.req.raw.signal,
+      ),
+    ),
+  );
   app.put('/api/resources/products/:id', async (c) => {
     const input = productUpdateSchema.parse(await parseJson(c.req.raw));
     store.updateProduct(

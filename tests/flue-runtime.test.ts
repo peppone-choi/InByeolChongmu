@@ -23,6 +23,41 @@ const post = (body: unknown) => ({
   body: JSON.stringify(body),
 });
 
+test('Flue requires the key for the selected model provider', () => {
+  const store = new Store(':memory:');
+  try {
+    const env = {
+      NODE_ENV: 'test',
+      AGENT_BACKEND: 'flue',
+      AGENT_MODEL: 'anthropic/claude-sonnet-4-6',
+      OPENAI_API_KEY: 'openai-test-key',
+      ANTHROPIC_API_KEY: '',
+    };
+    const readiness = (overrides: NodeJS.ProcessEnv = {}) =>
+      new FlueRunner(
+        store,
+        readConfig(root, { ...env, ...overrides }),
+      ).readiness();
+
+    assert.equal(readiness().code, 'ANTHROPIC_API_KEY_REQUIRED');
+    assert.equal(
+      readiness({ ANTHROPIC_API_KEY: 'anthropic-test-key' }).ready,
+      true,
+    );
+    assert.equal(readiness({ AGENT_MODEL: 'openai/gpt-5.5' }).ready, true);
+    assert.equal(
+      readiness({
+        AGENT_MODEL: 'openai/gpt-5.5',
+        OPENAI_API_KEY: '',
+        ANTHROPIC_API_KEY: 'anthropic-test-key',
+      }).code,
+      'OPENAI_API_KEY_REQUIRED',
+    );
+  } finally {
+    store.close();
+  }
+});
+
 test('actual Flue loop reads room history, executes real tools, validates and replays without another model turn', async () => {
   const runtimeDir = mkdtempSync(join(tmpdir(), 'inbyeol-flue-reset-'));
   const store = new Store(':memory:');

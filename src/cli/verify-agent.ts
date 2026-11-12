@@ -43,7 +43,7 @@ const sources = JSON.stringify([
 try {
   assert.ok(
     runner.readiness().ready,
-    'Configure AGENT_BACKEND=flue, AGENT_MODEL and OPENAI_API_KEY first.',
+    'Configure AGENT_BACKEND=flue, AGENT_MODEL and its provider API key first.',
   );
   const body = {
     schema_version: '0.1',

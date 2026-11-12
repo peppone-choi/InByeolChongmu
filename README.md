@@ -39,6 +39,7 @@
 - 상품·정책·주문 가상 JSON을 실제 SQLite에 적재해 읽습니다. 가격·할인·배송비 계산, 판매 일정 조회와 허용 문서 파일 읽기가 동작합니다.
 - 자료 도구 6개를 HTTP·CLI·MCP stdio·Flue에서 사용합니다. Flue가 도구를 선택해 실제 SQLite·문서를 읽고 `submit_analysis`로 검증된 결과를 제출합니다. TypeSafe 키가 있으면 `classify_inquiry`도 사용합니다.
 - 웹에서 상품명·별칭·옵션별 가격/재고·판매 마감과 정책을 수정하고 SQLite에 저장합니다. 배송비·할인·출고일 문구는 저장 값에 맞춰 생성하며 오래된 자료로 만든 초안 복사는 차단합니다.
+- 상품·정책 화면의 **채팅으로 추가**에서 상품 또는 정책 한 건을 설명하면 초안을 만듭니다. 빠진 필수값은 채팅에서 보완하고 등록 폼에서 확인한 뒤 저장합니다.
 - DM에서 현재 고객의 주문을 찾지 못하면 원문에 나온 이름으로 판매자 검토용 후보 ID를 조회합니다. 검토 화면의 후보 버튼에서 주문 상세를 열어 대조할 수 있습니다.
 - DM 검토에서 수령인·연락처·주소·우편번호·입금자명 옆의 **원문 보기**를 누르면 서버가 대조한 고객 발화로 이동합니다. 정정 주소는 띄어쓰기가 달라도 대조하고, 원문 보기에서 유지된 주소와 새 동·호·층을 한 화면에 표시합니다.
 - DM 검토 → **일괄 DM**에서 고객 아이디·상담 맥락·원문을 건별로 입력합니다. 최대 10건(요청 전체 64 KiB)을 접수한 뒤 한 건씩 분석합니다. 다시 열면 최근 50개 접수와 더 오래된 미처리 접수를 확인하고 필요한 건만 이어서 처리할 수 있습니다. 클레임과 확인 필요 건을 먼저 표시합니다.
@@ -51,9 +52,9 @@
 
 ### 아직 안 되는 것
 
-- Hermes·OpenAI Agents API·AI Gateway 추론 경로와 업무 캘린더·Sheets 계정 연결은 후속입니다. 현재 실행 경로는 Flue → OpenAI 직접 호출이며, Jev는 별도의 분류 도구입니다.
+- Hermes·OpenAI Agents API·AI Gateway 추론 경로와 업무 캘린더·Sheets 계정 연결은 후속입니다. Flue는 설정에서 선택한 OpenAI 또는 Claude API를 직접 호출합니다. Jev는 선택적 분류 도구입니다.
 - 실제 택배사 양식 어댑터·접수/송장 발급·실시간 배송 조회는 미구현입니다. 택배사 미정에 따라 현재는 공통 명단과 열 설정을 제공합니다.
-- Docker는 단일 서버·영속 볼륨·Bearer 토큰 또는 브라우저 세션으로 실행합니다. 사용자별 운영 인증·보관/삭제 정책·다중 서버 공유는 없으므로 실제 고객 자료나 공개 서비스에 사용하기 전 추가 구현이 필요합니다.
+- Docker는 단일 서버·영속 볼륨으로 실행하며 기본값은 Bearer 토큰 또는 브라우저 세션을 요구합니다. 데모용 공개 주소는 연결 암호 없이 접속하도록 설정할 수 있습니다. 실제 고객 자료를 사용하려면 사용자별 운영 인증과 보관 정책이 필요합니다.
 
 ### 설치와 실행
 
@@ -66,7 +67,7 @@ npm run db:seed
 npm run dev
 ```
 
-기존 `.env.local`이 있으면 복사로 덮어쓰지 마세요. API는 `http://127.0.0.1:3000`에서 실행합니다. `.env.local` → `.env` 순서로 읽으며 셸 환경 변수가 우선합니다. 기본 DB는 `.local/inbyeol.sqlite`이며 `AGENT_BACKEND=flue`, `AGENT_MODEL=openai/gpt-5.5`, `OPENAI_API_KEY`를 설정하면 채팅 요청에서 모델을 호출합니다. `TYPESAFE_API_KEY`는 선택 사항입니다. 기본 `disabled`에서는 자료 도구만 사용하고 채팅은 저장 후 `503`을 반환합니다.
+기존 `.env.local`이 있으면 복사로 덮어쓰지 마세요. API는 `http://127.0.0.1:3000`에서 실행합니다. `.env.local` → `.env` 순서로 읽으며 셸 환경 변수가 우선합니다. 기본 DB는 `.local/inbyeol.sqlite`이며 `AGENT_BACKEND=flue`, `AGENT_MODEL=openai/gpt-5.5`, `OPENAI_API_KEY`를 설정하면 채팅 요청에서 모델을 호출합니다. Claude를 쓰려면 `AGENT_MODEL=anthropic/claude-sonnet-4-6`과 `ANTHROPIC_API_KEY`를 설정합니다. `TYPESAFE_API_KEY`는 선택 사항입니다. 기본 `disabled`에서는 자료 도구만 사용하고 채팅은 저장 후 `503`을 반환합니다.
 
 `npm run build` / `npm start`로 컴파일·실행하고 `npm run typecheck`, `npm run lint`, `npm run format:check`, `npm test`로 검사합니다. 상세 API·도구·대화방·엑셀·백업 명령과 현재 한계는 [백엔드 사용법](docs/backend.md)에 있습니다.
 
@@ -101,6 +102,8 @@ docker compose down
 ```
 
 포트는 `127.0.0.1:3000`으로 공개하며 웹 화면도 함께 제공하며 API는 Bearer 토큰 또는 연결 화면에서 발급한 세션으로 인증합니다. 두 SQLite 파일은 `inbyeol-data` 볼륨에 보존됩니다. `down -v`는 자료를 삭제하므로 사용하지 마세요. 외부 배포에는 별도 HTTPS·운영 인증이 필요합니다. 상세 설정·백업은 [백엔드 사용법](docs/backend.md#docker-실행)을 따릅니다.
+
+키나 모델을 바꾸면 `docker compose up -d --force-recreate api`로 적용합니다. Cloudflare Tunnel에서 실행하는 방법은 [터널 설정](docs/backend.md#cloudflare-tunnel)을 참고하세요.
 
 `npm run verify:agent`는 env 키를 사용해 **유료 실제 호출**을 실행합니다. 격리된 가상 자료와 2026-11-05 기준 시각으로 대화 맥락·62,000원 계산·TypeSafe 도구·중복 재전송·원본 보존을 확인하고 임시 DB를 정리합니다. 자동 CI에는 포함하지 않습니다.
 

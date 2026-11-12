@@ -31,6 +31,10 @@ import {
 import type { Product, Policy } from '../../src/domain/schema.js';
 import type { ChatRequest } from '../../src/domain/schema.js';
 import {
+  catalogDraftSchema,
+  type CatalogDraftRequest,
+} from '../../src/domain/catalog-draft.js';
+import {
   batchListSchema,
   batchViewSchema,
   type CreateBatch,
@@ -111,6 +115,8 @@ export const api = {
   login: (token: string) => request('/api/session', sessionSchema, { token }),
   health: () => request('/health', healthSchema),
   resources: () => request('/api/resources', resourcesSchema),
+  catalogDraft: (input: CatalogDraftRequest, timeout: number) =>
+    request('/api/resources/draft', catalogDraftSchema, input, timeout),
   updateProduct: (product: Product, snapshot: string) =>
     request(
       `/api/resources/products/${encodeURIComponent(product.product_id)}`,

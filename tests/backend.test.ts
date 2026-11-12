@@ -367,6 +367,59 @@ test('HTTP rejects malformed, untrusted and oversized requests without storing m
   }
 });
 
+test('proxied HTTPS login accepts the configured origin and uses a secure cookie', async () => {
+  const { store, config } = setup();
+  try {
+    const apiToken = 'test-token';
+    const app = createApp(store, {
+      ...config,
+      deployment: 'container',
+      publicHostname: 'demo.example.com',
+      apiToken,
+    });
+    const url = 'http://demo.example.com/api/session';
+    const login = (origin: string) =>
+      app.request(url, {
+        method: 'POST',
+        headers: { Origin: origin, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: apiToken }),
+      });
+
+    assert.equal((await login('https://other.example.com')).status, 403);
+    assert.equal((await login('http://demo.example.com')).status, 403);
+    const session = await login('https://demo.example.com');
+    assert.equal(session.status, 200);
+    assert.match(session.headers.get('Set-Cookie') ?? '', /; Secure(?:;|$)/);
+
+    const publicApp = createApp(store, {
+      ...config,
+      deployment: 'container',
+      publicHostname: 'demo.example.com',
+      publicAccess: true,
+      apiToken,
+    });
+    const publicSession = await publicApp.request(url);
+    assert.deepEqual(await publicSession.json(), {
+      authenticated: true,
+      authentication_required: false,
+      method: 'none',
+    });
+    const resources = 'http://demo.example.com/api/resources';
+    assert.equal((await publicApp.request(resources)).status, 200);
+    assert.equal((await publicApp.request('/api/resources')).status, 401);
+    assert.equal(
+      (
+        await publicApp.request(resources, {
+          headers: { Origin: 'https://other.example.com' },
+        })
+      ).status,
+      403,
+    );
+  } finally {
+    store.close();
+  }
+});
+
 test('room-bound order tool cannot retrieve another customer and image-only chat stays unsupported', async () => {
   const { store, app } = setup();
   try {

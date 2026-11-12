@@ -9,8 +9,10 @@ import {
   RefreshCw,
   Plus,
   Trash2,
+  MessageSquare,
 } from 'lucide-react';
 import type { Resources } from '../../src/domain/http-contract';
+import type { CatalogDraftRequest } from '../../src/domain/catalog-draft';
 import {
   productSchema,
   policySchema,
@@ -31,9 +33,11 @@ const localTime = (value: string) => {
 export function ResourceEditor({
   resources,
   onSaved,
+  draftTimeout,
 }: {
   resources: Resources | null;
   onSaved: (resources: Resources) => void;
+  draftTimeout: number;
 }) {
   const [editing, setEditing] = useState<Editing | null>(null),
     [error, setError] = useState(''),
@@ -42,12 +46,19 @@ export function ResourceEditor({
     [conflict, setConflict] = useState(false),
     [generation, setGeneration] = useState(0),
     [policyKind, setPolicyKind] = useState('text'),
+    [chatOpen, setChatOpen] = useState(false),
+    [chatText, setChatText] = useState(''),
+    [messages, setMessages] = useState<CatalogDraftRequest['messages']>([]),
     [removing, setRemoving] = useState<{
       kind: 'products' | 'policies';
       id: string;
       name: string;
     } | null>(null);
   const editorRef = useRef<HTMLElement>(null);
+  const chatRef = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    if (chatOpen && !editing) chatRef.current?.focus({ preventScroll: true });
+  }, [chatOpen, editing]);
   useEffect(() => {
     const editor = editorRef.current;
     if (editor) {
@@ -142,6 +153,7 @@ export function ResourceEditor({
       }
       onSaved(updated);
       setEditing(null);
+      setMessages([]);
       setSuccess(
         '저장했습니다. 새 분석부터 수정한 자료를 사용합니다. 기존 초안은 자료 버전을 다시 확인해 주세요.',
       );
@@ -156,12 +168,69 @@ export function ResourceEditor({
       setSaving(false);
     }
   };
+  const draftFromChat = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const text = chatText.trim();
+    if (!resources || editing || saving || !text || messages.length >= 11)
+      return;
+    const next = [...messages, { role: 'seller' as const, text }];
+    setSaving(true);
+    setError('');
+    setSuccess('');
+    setConflict(false);
+    try {
+      const draft = await api.catalogDraft({ messages: next }, draftTimeout);
+      if (
+        draft.kind === 'policy' &&
+        draft.value.product_id &&
+        !resources.products.some(
+          (product) => product.product_id === draft.value.product_id,
+        )
+      )
+        onSaved(await api.resources());
+      setMessages([
+        ...next,
+        {
+          role: 'assistant',
+          text:
+            draft.kind === 'question'
+              ? draft.question
+              : draft.create
+                ? '등록 초안을 만들었습니다. 입력값을 확인하고 저장하세요.'
+                : '기존 정책을 수정하는 초안입니다. 바뀔 값을 확인하고 저장하세요.',
+        },
+      ]);
+      setChatText('');
+      if (draft.kind !== 'question') {
+        setEditing(draft);
+        setGeneration((n) => n + 1);
+      }
+    } catch (error) {
+      setError(
+        error instanceof ApiError ? error.message : '초안을 만들지 못했습니다.',
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
   const reload = async () => {
     if (!editing) return;
     setSaving(true);
     try {
       const latest = await api.resources();
       onSaved(latest);
+      if (editing.create) {
+        setEditing({
+          ...editing,
+          snapshot:
+            latest.snapshots[
+              editing.kind === 'product' ? 'products' : 'policies'
+            ],
+        });
+        setConflict(false);
+        setError('');
+        return;
+      }
       open(
         editing.kind,
         editing.kind === 'product'
@@ -188,6 +257,15 @@ export function ResourceEditor({
       <div className="data-actions">
         <button
           className="button primary"
+          disabled={!resources || !!editing || saving}
+          aria-expanded={chatOpen}
+          onClick={() => setChatOpen((open) => !open)}
+        >
+          <MessageSquare size={16} />
+          채팅으로 추가
+        </button>
+        <button
+          className="button"
           disabled={!resources || !!editing || saving}
           onClick={() => {
             if (!resources) return;
@@ -272,6 +350,64 @@ export function ResourceEditor({
           정책 추가
         </button>
       </div>
+      {chatOpen && !editing && (
+        <section className="resource-editor" aria-label="상품·정책 등록 채팅">
+          <form onSubmit={(event) => void draftFromChat(event)}>
+            {messages.length > 0 && (
+              <div role="log" aria-label="등록 대화">
+                {messages.map((message, index) => (
+                  <p key={index}>
+                    <strong>
+                      {message.role === 'seller' ? '판매자' : '인별총무'}
+                    </strong>{' '}
+                    {message.text}
+                  </p>
+                ))}
+              </div>
+            )}
+            <label>
+              등록할 상품 또는 정책
+              <textarea
+                ref={chatRef}
+                value={chatText}
+                onChange={(event) => setChatText(event.target.value)}
+                placeholder="예시　미개봉 상품은 수령 후 7일 안에 교환할 수 있어요."
+                rows={3}
+                maxLength={1500}
+                disabled={saving || messages.length >= 11}
+                required
+              />
+            </label>
+            {messages.length >= 11 && (
+              <p className="muted">계속하려면 처음부터 시작해 주세요.</p>
+            )}
+            <footer>
+              {messages.length > 0 && (
+                <button
+                  className="button"
+                  type="button"
+                  disabled={saving}
+                  onClick={() => {
+                    setMessages([]);
+                    setChatText('');
+                    setError('');
+                    chatRef.current?.focus();
+                  }}
+                >
+                  처음부터
+                </button>
+              )}
+              <button
+                className="button primary"
+                type="submit"
+                disabled={!chatText.trim() || saving || messages.length >= 11}
+              >
+                {saving ? '초안 작성 중…' : '보내기'}
+              </button>
+            </footer>
+          </form>
+        </section>
+      )}
       {!resources?.products.length && (
         <p className="muted">
           상품이 없습니다. 상품을 추가하거나 설정에서 엑셀을 가져오세요.

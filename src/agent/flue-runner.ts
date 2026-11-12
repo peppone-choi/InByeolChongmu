@@ -1,6 +1,7 @@
 import { init, instrument } from '@flue/runtime';
 import { start, sqlite, type Flue } from '@flue/runtime/node';
 import type { Provider } from '@earendil-works/pi-ai';
+import { anthropicProvider } from '@earendil-works/pi-ai/providers/anthropic';
 import { openaiProvider } from '@earendil-works/pi-ai/providers/openai';
 import {
   mkdirSync,
@@ -20,6 +21,47 @@ import type { AgentRunner, AgentRun } from './types.js';
 import { createRuntimeAgent } from './runtime-agent.js';
 import { validateAnalysis } from './validate-analysis.js';
 
+const modelProviders = [
+  { id: 'openai', create: openaiProvider, key: 'OPENAI_API_KEY' },
+  { id: 'anthropic', create: anthropicProvider, key: 'ANTHROPIC_API_KEY' },
+] as const;
+
+export function configuredProviders(config: Config): Provider[] {
+  return modelProviders.map(({ create, key }) => ({
+    ...create(),
+    auth: {
+      apiKey: {
+        name: key,
+        resolve: async () => {
+          const apiKey = providerEnvironment(config)[key]?.trim();
+          return apiKey ? { auth: { apiKey } } : undefined;
+        },
+      },
+    },
+  }));
+}
+
+export function flueReadiness(config: Config, customProviders = false) {
+  if (config.agentBackend !== 'flue')
+    return {
+      ready: false,
+      code:
+        config.agentBackend === 'disabled'
+          ? 'MODEL_NOT_CONNECTED'
+          : 'BACKEND_NOT_IMPLEMENTED',
+    };
+  if (!config.agentModel) return { ready: false, code: 'AGENT_MODEL_REQUIRED' };
+  if (!customProviders) {
+    const provider = modelProviders.find(({ id }) =>
+      config.agentModel.startsWith(id + '/'),
+    );
+    if (!provider) return { ready: false, code: 'PROVIDER_NOT_IMPLEMENTED' };
+    if (!config.credentials[provider.id])
+      return { ready: false, code: provider.key + '_REQUIRED' };
+  }
+  return { ready: true, code: null };
+}
+
 export class FlueRunner implements AgentRunner {
   private runtime: Promise<Flue> | undefined;
   private removeInstrumentation: (() => Promise<void>) | undefined;
@@ -38,28 +80,7 @@ export class FlueRunner implements AgentRunner {
     this.agent = createRuntimeAgent(store, config);
   }
   readiness() {
-    if (this.config.agentBackend !== 'flue')
-      return {
-        ready: false,
-        code:
-          this.config.agentBackend === 'disabled'
-            ? 'MODEL_NOT_CONNECTED'
-            : 'BACKEND_NOT_IMPLEMENTED',
-      };
-    if (!this.config.agentModel)
-      return { ready: false, code: 'AGENT_MODEL_REQUIRED' };
-    if (
-      !this.options.providers &&
-      (!this.config.agentModel.startsWith('openai/') ||
-        !this.config.credentials.openai)
-    )
-      return {
-        ready: false,
-        code: this.config.agentModel.startsWith('openai/')
-          ? 'OPENAI_API_KEY_REQUIRED'
-          : 'PROVIDER_NOT_IMPLEMENTED',
-      };
-    return { ready: true, code: null };
+    return flueReadiness(this.config, !!this.options.providers);
   }
   private async ensureStarted() {
     if (!this.runtime) {
@@ -78,20 +99,8 @@ export class FlueRunner implements AgentRunner {
           recursive: true,
           mode: 0o700,
         });
-      const candidates: Provider[] = this.options.providers ?? [
-        {
-          ...openaiProvider(),
-          auth: {
-            apiKey: {
-              name: 'OpenAI environment key',
-              resolve: async () => {
-                const key = providerEnvironment(this.config).OPENAI_API_KEY;
-                return key ? { auth: { apiKey: key } } : undefined;
-              },
-            },
-          },
-        },
-      ];
+      const candidates =
+        this.options.providers ?? configuredProviders(this.config);
       const providers = candidates.map(
         (provider) =>
           ({
