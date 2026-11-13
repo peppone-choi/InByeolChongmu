@@ -7,6 +7,7 @@ import {
   shipmentEventSchema,
   shipmentResultSchema,
   type ShipmentCommand,
+  type ShipmentImportEntry,
 } from '../domain/shipping.js';
 import { AppError } from '../domain/errors.js';
 import { amountSchema, orderSchema, type Order } from '../domain/schema.js';
@@ -406,116 +407,148 @@ export class Commerce {
       .map((r) => shipmentEventSchema.parse(JSON.parse(String(r.payload))));
   }
   shipment(seller: string, id: string, raw: ShipmentCommand, now = new Date()) {
-    const input = shipmentCommandSchema.parse(raw);
+    return this.atomic(() =>
+      this.writeShipment(seller, id, shipmentCommandSchema.parse(raw), now),
+    );
+  }
+  importShipments(
+    seller: string,
+    entries: ShipmentImportEntry[],
+    now = new Date(),
+  ) {
     return this.atomic(() => {
-      const fingerprint = createHash('sha256')
-        .update(JSON.stringify({ id, input }))
-        .digest('hex');
-      const cached = this.db
-        .prepare(
-          'SELECT fingerprint,result FROM order_commands WHERE seller_id=? AND command_id=?',
-        )
-        .get(seller, input.command_id);
-      if (cached) {
-        if (cached.fingerprint !== fingerprint)
-          throw new AppError(
-            'IDEMPOTENCY_CONFLICT',
-            '같은 요청 ID의 내용이 다릅니다.',
-            409,
-          );
-        return {
-          ...shipmentResultSchema.parse(JSON.parse(String(cached.result))),
-          replayed: true,
-        };
+      let replayed = 0;
+      for (const entry of entries) {
+        try {
+          if (
+            this.writeShipment(seller, entry.order_id, entry.command, now)
+              .replayed
+          )
+            replayed++;
+        } catch (error) {
+          if (error instanceof AppError)
+            throw new AppError(
+              error.code,
+              `${entry.row}행: ${error.message}`,
+              error.status,
+            );
+          throw error;
+        }
       }
-      const order = this.get(seller, id);
-      if (input.operation === 'register_shipment' && order.status === 'shipped')
-        throw new AppError(
-          'SHIPMENT_ALREADY_RECORDED',
-          '이미 발송 기록이 있습니다. 정정 기능을 사용하세요.',
-          409,
-        );
-      if (
-        order.status !==
-        (input.operation === 'register_shipment' ? 'confirmed' : 'shipped')
-      )
-        throw new AppError(
-          'INVALID_ORDER_STATE',
-          '발송 등록은 확정 주문, 정정은 발송된 주문만 가능합니다.',
-          409,
-        );
-      if (order.version !== input.expected_version)
-        throw new AppError(
-          'STALE_VERSION',
-          '주문이 변경됐습니다. 최신 기록을 다시 확인하세요.',
-          409,
-        );
-      if (
-        !order.confirmed_at ||
-        !Number.isFinite(Date.parse(order.confirmed_at)) ||
-        Date.parse(input.shipped_at) < Date.parse(order.confirmed_at) ||
-        Date.parse(input.shipped_at) > now.getTime()
-      )
-        throw new AppError(
-          'INVALID_SHIPMENT_TIME',
-          '발송 시각은 확정 이후이며 현재 시각을 넘을 수 없습니다.',
-          422,
-        );
-      const before = {
-          carrier: order.carrier,
-          tracking_number: order.tracking_number,
-          shipped_at: order.shipped_at,
-        },
-        after = {
-          carrier: input.carrier,
-          tracking_number: input.tracking_number,
-          shipped_at: input.shipped_at,
-        };
-      if (
-        input.operation === 'update_shipment' &&
-        before.carrier?.trim() === after.carrier &&
-        before.tracking_number?.replace(/\s/g, '') === after.tracking_number &&
-        Date.parse(before.shipped_at ?? '') === Date.parse(after.shipped_at)
-      )
-        throw new AppError('NO_CHANGE', '정정할 내용을 변경하세요.', 422);
-      const saved = this.persist(seller, {
-        ...order,
-        ...after,
-        status: 'shipped',
-        version: order.version + 1,
-      });
-      const event = shipmentEventSchema.parse({
-        event_id: randomUUID(),
-        command_id: input.command_id,
-        order_id: id,
-        operation: input.operation,
-        version: saved.version,
-        actor: seller,
-        recorded_at: now.toISOString(),
-        correction_reason:
-          input.operation === 'update_shipment'
-            ? input.correction_reason
-            : null,
-        before,
-        after,
-      });
-      this.db
-        .prepare('INSERT INTO shipment_events VALUES(?,?,?,?)')
-        .run(seller, id, event.event_id, JSON.stringify(event));
-      const result = {
-        command_id: input.command_id,
-        order_id: id,
-        status: 'shipped' as const,
-        version: saved.version,
-        order: saved,
-        event,
-        replayed: false,
-      };
-      this.db
-        .prepare('INSERT INTO order_commands VALUES(?,?,?,?)')
-        .run(seller, input.command_id, fingerprint, JSON.stringify(result));
-      return result;
+      return { registered: entries.length - replayed, replayed };
     });
+  }
+  private writeShipment(
+    seller: string,
+    id: string,
+    input: ShipmentCommand,
+    now: Date,
+  ) {
+    const fingerprint = createHash('sha256')
+      .update(JSON.stringify({ id, input }))
+      .digest('hex');
+    const cached = this.db
+      .prepare(
+        'SELECT fingerprint,result FROM order_commands WHERE seller_id=? AND command_id=?',
+      )
+      .get(seller, input.command_id);
+    if (cached) {
+      if (cached.fingerprint !== fingerprint)
+        throw new AppError(
+          'IDEMPOTENCY_CONFLICT',
+          '같은 요청 ID의 내용이 다릅니다.',
+          409,
+        );
+      return {
+        ...shipmentResultSchema.parse(JSON.parse(String(cached.result))),
+        replayed: true,
+      };
+    }
+    const order = this.get(seller, id);
+    if (input.operation === 'register_shipment' && order.status === 'shipped')
+      throw new AppError(
+        'SHIPMENT_ALREADY_RECORDED',
+        '이미 발송 기록이 있습니다. 정정 기능을 사용하세요.',
+        409,
+      );
+    if (
+      order.status !==
+      (input.operation === 'register_shipment' ? 'confirmed' : 'shipped')
+    )
+      throw new AppError(
+        'INVALID_ORDER_STATE',
+        '발송 등록은 확정 주문, 정정은 발송된 주문만 가능합니다.',
+        409,
+      );
+    if (order.version !== input.expected_version)
+      throw new AppError(
+        'STALE_VERSION',
+        '주문이 변경됐습니다. 최신 기록을 다시 확인하세요.',
+        409,
+      );
+    if (
+      !order.confirmed_at ||
+      !Number.isFinite(Date.parse(order.confirmed_at)) ||
+      Date.parse(input.shipped_at) < Date.parse(order.confirmed_at) ||
+      Date.parse(input.shipped_at) > now.getTime()
+    )
+      throw new AppError(
+        'INVALID_SHIPMENT_TIME',
+        '발송 시각은 확정 이후이며 현재 시각을 넘을 수 없습니다.',
+        422,
+      );
+    const before = {
+        carrier: order.carrier,
+        tracking_number: order.tracking_number,
+        shipped_at: order.shipped_at,
+      },
+      after = {
+        carrier: input.carrier,
+        tracking_number: input.tracking_number,
+        shipped_at: input.shipped_at,
+      };
+    if (
+      input.operation === 'update_shipment' &&
+      before.carrier?.trim() === after.carrier &&
+      before.tracking_number?.replace(/\s/g, '') === after.tracking_number &&
+      Date.parse(before.shipped_at ?? '') === Date.parse(after.shipped_at)
+    )
+      throw new AppError('NO_CHANGE', '정정할 내용을 변경하세요.', 422);
+    const saved = this.persist(seller, {
+      ...order,
+      ...after,
+      status: 'shipped',
+      version: order.version + 1,
+    });
+    const event = shipmentEventSchema.parse({
+      event_id: randomUUID(),
+      command_id: input.command_id,
+      order_id: id,
+      operation: input.operation,
+      version: saved.version,
+      actor: seller,
+      recorded_at: now.toISOString(),
+      correction_reason:
+        input.operation === 'update_shipment' ? input.correction_reason : null,
+      before,
+      after,
+    });
+    this.db
+      .prepare('INSERT INTO shipment_events VALUES(?,?,?,?)')
+      .run(seller, id, event.event_id, JSON.stringify(event));
+    const result = {
+      command_id: input.command_id,
+      order_id: id,
+      status: 'shipped' as const,
+      version: saved.version,
+      order: saved,
+      event,
+      replayed: false,
+    };
+    this.db
+      .prepare('INSERT INTO order_commands VALUES(?,?,?,?)')
+      .run(seller, input.command_id, fingerprint, JSON.stringify(result));
+    return result;
   }
   remove(seller: string, id: string, version: number) {
     return this.atomic(() => {

@@ -24,6 +24,8 @@ Node.js `26.5.1` 이상 `27` 미만과 npm을 사용합니다. `npm ci`, `npm ru
 
 Docker는 `docker compose up -d --build`이며 32자 이상 `LOCAL_API_TOKEN`이 필수입니다. 두 DB를 같은 영속 볼륨에 두고 이미지에 env·DB를 복사하지 마세요. 단일 Node 프로세스만 지원합니다. Cloudflare Tunnel을 함께 실행할 때는 `compose.tunnel.yaml`과 [터널 설정](docs/backend.md#cloudflare-tunnel)을 따르세요.
 
+답장 템플릿은 판매자가 확인하는 편집 단계에 적용합니다. 송장 엑셀은 주문 ID로 대조하고 단건 등록과 같은 상태·버전·감사 이력 검사를 사용합니다.
+
 DB·상품 XLSX·MCP 명령은 `docs/backend.md`를 따릅니다. 파일 SQLite를 기본으로, `:memory:`는 테스트용으로 사용합니다. 실제 고객 자료·운영 DB에 seed·테스트를 실행하지 마세요. `.env.local` → `.env` → 셸 환경 변수 순서로 우선하며 비밀 값·DB·백업·개인정보를 커밋하지 마세요. `.env.example`은 빈 키 이름만 제공합니다.
 
 ## 코드 스타일과 이름 규칙

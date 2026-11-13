@@ -59,6 +59,37 @@ export const shipmentHistorySchema = z.object({
 export type ShipmentCommand = z.infer<typeof shipmentCommandSchema>;
 export type ShipmentEvent = z.infer<typeof shipmentEventSchema>;
 
+const shipmentImportEntry = z.strictObject({
+  row: z.number().int().min(2).max(201),
+  order_id: z.string().trim().min(1).max(100),
+  command: z.strictObject({
+    ...commandFields,
+    operation: z.literal('register_shipment'),
+  }),
+});
+export const shipmentImportRequestSchema = z.strictObject({
+  entries: z
+    .array(shipmentImportEntry)
+    .min(1)
+    .max(200)
+    .refine(
+      (entries) =>
+        new Set(entries.map((entry) => entry.order_id)).size === entries.length,
+      '주문 ID가 중복됐습니다.',
+    ),
+});
+export const shipmentImportPreviewSchema = z.strictObject({
+  entries: z.array(shipmentImportEntry),
+  errors: z.array(
+    z.strictObject({ row: z.number().int(), message: z.string() }),
+  ),
+});
+export const shipmentImportResultSchema = z.strictObject({
+  registered: z.number().int().nonnegative(),
+  replayed: z.number().int().nonnegative(),
+});
+export type ShipmentImportEntry = z.infer<typeof shipmentImportEntry>;
+
 export const parcelFields = [
   'order_id',
   'recipient_name',

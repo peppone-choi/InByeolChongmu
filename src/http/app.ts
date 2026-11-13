@@ -19,11 +19,17 @@ import {
   exportCurrentWorkbook,
 } from '../storage/data-workbook.js';
 import {
+  shipmentImportRequestSchema,
   shipmentCommandSchema,
   parcelTemplateSchema,
   parcelSelectionSchema,
   parcelCreateSchema,
 } from '../domain/shipping.js';
+import { replyTemplateSchema } from '../domain/reply-template.js';
+import {
+  previewShipments,
+  shipmentWorkbookTemplate,
+} from '../storage/shipment-workbook.js';
 import { roomDetail, roomSummary } from './room-view.js';
 import { bodyLimit } from 'hono/body-limit';
 import { z } from 'zod';
@@ -126,14 +132,15 @@ export function createApp(
   });
   app.use('/api/*', async (c, next) =>
     bodyLimit({
-      maxSize:
-        c.req.path === '/api/data/import/preview'
-          ? 2 * 1024 * 1024
+      maxSize: workbookUploadPaths.has(c.req.path)
+        ? 2 * 1024 * 1024
+        : c.req.path === '/api/shipment-import/apply'
+          ? 256 * 1024
           : maxBatchBytes,
       onError: () => {
         throw new AppError(
           'BODY_TOO_LARGE',
-          '일반 요청은 최대 64 KiB, 엑셀 파일은 최대 2 MiB입니다.',
+          '요청 크기 제한을 초과했습니다. 엑셀 파일은 최대 2 MiB입니다.',
           413,
         );
       },
@@ -141,7 +148,7 @@ export function createApp(
   );
   app.use('/api/*', async (c, next) => {
     if (
-      c.req.path !== '/api/data/import/preview' &&
+      !workbookUploadPaths.has(c.req.path) &&
       ['POST', 'PUT', 'DELETE'].includes(c.req.method) &&
       c.req.path !== '/api/session' &&
       !/^application\/json(?:\s*;|$)/i.test(c.req.header('Content-Type') ?? '')
@@ -211,6 +218,45 @@ export function createApp(
     },
   });
   app.get('/api/resources', (c) => c.json(resources()));
+  app.get('/api/reply-template', (c) =>
+    c.json({ template: store.replyTemplate(config.sellerId) }),
+  );
+  app.put('/api/reply-template', async (c) => {
+    const input = replyTemplateSchema.parse(await parseJson(c.req.raw));
+    store.saveReplyTemplate(config.sellerId, input.template);
+    return c.json(input);
+  });
+  app.get('/api/shipment-import/template', async (c) => {
+    c.header('Content-Type', workbookMime);
+    c.header(
+      'Content-Disposition',
+      'attachment; filename="shipment-import.xlsx"',
+    );
+    return c.body(new Uint8Array(await shipmentWorkbookTemplate()));
+  });
+  app.post('/api/shipment-import/preview', async (c) => {
+    requireWorkbook(c.req.header('Content-Type'));
+    return c.json(
+      await previewShipments(
+        store.commerce,
+        config.sellerId,
+        Buffer.from(await c.req.arrayBuffer()),
+        options.clock?.(),
+      ),
+    );
+  });
+  app.post('/api/shipment-import/apply', async (c) => {
+    const { entries } = shipmentImportRequestSchema.parse(
+      await parseJson(c.req.raw),
+    );
+    return c.json(
+      store.commerce.importShipments(
+        config.sellerId,
+        entries,
+        options.clock?.(),
+      ),
+    );
+  });
   app.post('/api/resources/draft', async (c) =>
     c.json(
       await draftCatalog(
@@ -397,12 +443,7 @@ export function createApp(
     );
   });
   app.post('/api/data/import/preview', async (c) => {
-    if (
-      !/^application\/vnd.openxmlformats-officedocument.spreadsheetml.sheet(?:;|$)/i.test(
-        c.req.header('Content-Type') ?? '',
-      )
-    )
-      throw new AppError('XLSX_REQUIRED', '.xlsx 파일을 선택하세요.', 415);
+    requireWorkbook(c.req.header('Content-Type'));
     return c.json(
       await imports.preview(
         config.sellerId,
@@ -604,4 +645,15 @@ async function parseJson(request: Request): Promise<unknown> {
   } catch {
     throw new AppError('INVALID_JSON', 'JSON 형식이 올바르지 않습니다.', 400);
   }
+}
+
+const workbookMime =
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+const workbookUploadPaths = new Set([
+  '/api/data/import/preview',
+  '/api/shipment-import/preview',
+]);
+function requireWorkbook(contentType: string | undefined) {
+  if (contentType?.split(';')[0]?.trim().toLowerCase() !== workbookMime)
+    throw new AppError('XLSX_REQUIRED', '.xlsx 파일을 선택하세요.', 415);
 }

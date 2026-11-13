@@ -1,5 +1,8 @@
 import { z } from 'zod';
 import {
+  shipmentImportPreviewSchema,
+  shipmentImportResultSchema,
+  type ShipmentImportEntry,
   shipmentResultSchema,
   shipmentHistorySchema,
   parcelTemplateViewSchema,
@@ -10,6 +13,7 @@ import {
   parcelExportSchema,
   type ShipmentCommand,
 } from '../../src/domain/shipping.js';
+import { replyTemplateSchema } from '../../src/domain/reply-template.js';
 import {
   savedOrderSchema,
   orderListSchema,
@@ -94,6 +98,28 @@ async function request<T>(
   );
 }
 export const api = {
+  replyTemplate: () => request('/api/reply-template', replyTemplateSchema),
+  saveReplyTemplate: (template: string) =>
+    request(
+      '/api/reply-template',
+      replyTemplateSchema,
+      { template },
+      15000,
+      'PUT',
+    ),
+  shipmentImportPreview: (file: File) =>
+    uploadWorkbook(
+      '/api/shipment-import/preview',
+      shipmentImportPreviewSchema,
+      file,
+    ),
+  shipmentImportApply: (entries: ShipmentImportEntry[]) =>
+    request(
+      '/api/shipment-import/apply',
+      shipmentImportResultSchema,
+      { entries },
+      30000,
+    ),
   batches: () => request('/api/dm-batches', batchListSchema),
   batch: (id: string) => request(`/api/dm-batches/${id}`, batchViewSchema),
   createBatch: (body: CreateBatch) =>
@@ -251,28 +277,8 @@ export const api = {
     ),
   importApply: (token: string) =>
     request('/api/data/import/apply', resourcesSchema, { token }),
-  importPreview: async (file: File) => {
-    const response = await fetch('/api/data/import/preview', {
-      method: 'POST',
-      credentials: 'same-origin',
-      headers: {
-        'Content-Type':
-          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      },
-      body: file,
-      signal: AbortSignal.timeout(30000),
-    });
-    const raw: unknown = await response.json();
-    const parsed = importPreviewSchema.safeParse(raw);
-    if (parsed.success) return parsed.data;
-    const error = z
-      .object({ error: z.object({ message: z.string() }) })
-      .safeParse(raw);
-    throw new ApiError(
-      error.success ? error.data.error.message : '파일 분석에 실패했습니다.',
-      response.status,
-    );
-  },
+  importPreview: (file: File) =>
+    uploadWorkbook('/api/data/import/preview', importPreviewSchema, file),
   rooms: () =>
     request(
       '/api/conversations',
@@ -289,6 +295,33 @@ export const api = {
     request('/api/chat', resultSchema, input, timeout),
 };
 export type Api = typeof api;
+
+async function uploadWorkbook<T>(
+  path: string,
+  schema: z.ZodType<T>,
+  file: File,
+) {
+  const response = await fetch(path, {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: {
+      'Content-Type':
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    },
+    body: file,
+    signal: AbortSignal.timeout(30000),
+  });
+  const raw: unknown = await response.json();
+  const parsed = schema.safeParse(raw);
+  if (parsed.success) return parsed.data;
+  const error = z
+    .object({ error: z.object({ message: z.string() }) })
+    .safeParse(raw);
+  throw new ApiError(
+    error.success ? error.data.error.message : '파일 분석에 실패했습니다.',
+    response.status,
+  );
+}
 
 export async function downloadParcel(id: string) {
   const response = await fetch(

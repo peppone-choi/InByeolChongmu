@@ -52,6 +52,8 @@ import { workspace } from './workspace';
 import { analysisIsStale } from './resource-version';
 import { Orders } from './Orders';
 import { DataManagement } from './DataManagement';
+import { ReplyTemplate } from './ReplyTemplate';
+import { renderReplyTemplate } from '../../src/domain/reply-template';
 import { api } from './api';
 import { ResourceEditor } from './ResourceEditor';
 import { ToolProgress } from './ToolProgress';
@@ -185,6 +187,20 @@ export default function App() {
           preview.field,
         )
       : [];
+  const [replyTemplate, setReplyTemplate] = useState('');
+  useEffect(() => {
+    if (!state.authenticated) return;
+    let live = true;
+    void api
+      .replyTemplate()
+      .then(({ template }) => {
+        if (live) setReplyTemplate(template);
+      })
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [state.authenticated]);
   const draft = active ? (edited[editId] ?? active.draft ?? '') : '';
   const pending = active ? state.pending[active.id] : undefined;
   const currentLatest = active ? state.details[active.id]?.latest : null;
@@ -808,6 +824,30 @@ export default function App() {
                               <span>
                                 {draft.length}자 · 자유롭게 수정하세요
                               </span>
+                              {replyTemplate &&
+                                edited[editId] === undefined && (
+                                  <button
+                                    type="button"
+                                    disabled={stale}
+                                    onClick={() => {
+                                      setEdited((prior) => ({
+                                        ...prior,
+                                        [editId]: renderReplyTemplate(
+                                          replyTemplate,
+                                          draft,
+                                        ),
+                                      }));
+                                      setCopyState('idle');
+                                      setReviewed((prior) => {
+                                        const next = new Set(prior);
+                                        next.delete(editId);
+                                        return next;
+                                      });
+                                    }}
+                                  >
+                                    템플릿 적용
+                                  </button>
+                                )}
                               {edited[editId] !== undefined && (
                                 <button
                                   onClick={() => {
@@ -1472,6 +1512,7 @@ export default function App() {
                   연결 상태·자료 새로고침
                 </Button>
               </section>
+              <ReplyTemplate onSaved={setReplyTemplate} />
               <DataManagement
                 resources={state.resources}
                 onSaved={(r) => workspace.acceptResources(r)}

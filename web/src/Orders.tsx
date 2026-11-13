@@ -14,6 +14,7 @@ import type {
 } from '../../src/domain/commerce';
 import type { Resources } from '../../src/domain/http-contract';
 import { ShipmentPanel } from './ShipmentPanel';
+import { ShipmentImportPanel } from './ShipmentImportPanel';
 import { ParcelExportPanel } from './ParcelExportPanel';
 import { api, ApiError } from './api';
 import { money } from './data';
@@ -44,7 +45,8 @@ export function Orders({
     [command, setCommand] = useState<ConfirmOrder | null>(null),
     [confirmedChecks, setConfirmedChecks] = useState(false),
     [deleteTarget, setDeleteTarget] = useState<SavedOrder | null>(null),
-    [showParcel, setShowParcel] = useState(false);
+    [showParcel, setShowParcel] = useState(false),
+    [showImport, setShowImport] = useState(false);
   const order = orders.find((o) => o.order_id === selected);
   const load = async () => {
     const [rows, r] = await Promise.all([api.orders(), api.resources()]);
@@ -164,6 +166,14 @@ export function Orders({
         </p>
       </div>
       <div className="data-actions">
+        <button
+          className="button"
+          disabled={busy}
+          aria-expanded={showImport}
+          onClick={() => setShowImport((value) => !value)}
+        >
+          송장 엑셀 업로드
+        </button>
         <label>
           아이디·이름 검색
           <input
@@ -207,6 +217,7 @@ export function Orders({
         </button>
       </div>
       {showParcel && <ParcelExportPanel orders={orders} />}
+      {showImport && <ShipmentImportPanel onSaved={load} />}
       {error && (
         <p className="error-copy" role="alert">
           {error}

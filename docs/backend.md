@@ -103,6 +103,8 @@ SQLite의 `sources`, `records`는 판매자와 자료 종류로 구분합니다.
 - `PUT /api/resources/products/:id`: `{snapshot_id,product}`. 읽은 상품 스냅샷과 전체 상품 객체를 보내 기존 상품을 수정합니다. 상품 ID 변경은 거절하고 옵션 추가·삭제를 허용합니다. 필수값·숫자·중복·할인 호환성을 검증한 뒤 원자 저장합니다.
 - `PUT /api/resources/policies/:id`: `{snapshot_id,policy}`. 기존 정책 종류를 보존하고 수정합니다. 배송비·할인 각각 최대 1개, 실제 할인 상품·최소 수량·할인액을 검증합니다. 배송비/할인/출고일 문구는 입력된 구조화 값으로 생성해 문구와 계산을 일치시킵니다. 일반 정책 문구는 직접 편집합니다.
 - `GET /health`: 자료 서버 상태. `model_configured`와 `model_status`는 설정 유무만 표시하며 실제 공급자 접근 성공을 보증하지 않습니다. 모델 이름·실행 제한·TypeSafe 키 설정 여부만 추가로 반환하며 키 값은 포함하지 않습니다.
+- `GET/PUT /api/reply-template`: 상점별 `{template}`을 읽거나 저장합니다. 비어 있으면 사용하지 않으며, 작성할 때는 `{{답장}}`을 한 번 넣습니다. DM 검토 화면에서 적용한 결과를 편집·복사합니다.
+- 송장 업로드는 `GET /api/shipment-import/template`로 양식을 받고, `POST /api/shipment-import/preview`에 XLSX를 올려 검토한 뒤 `POST /api/shipment-import/apply`로 등록합니다. 첫 시트에 주문 ID·택배사·송장번호·발송 시각을 텍스트로 넣습니다. 발송 시각은 `2026-11-13T14:30:00+09:00`처럼 시간대가 포함되어야 합니다. 최대 200건이며 주문 버전과 발송 상태를 저장 직전에 다시 검사합니다. 한 행이라도 실패하면 전체를 되돌립니다.
 - `POST /api/resources/draft`: 판매자와 인별총무의 등록 대화를 받아 추가 질문 또는 상품·정책 한 건의 등록 초안을 반환합니다. 같은 종류의 배송비나 상품 할인 정책이 있으면 수정 초안을 반환합니다. 판매 자료를 바꾸려면 기존 등록·수정 API에서 자료 버전과 입력을 다시 검증하고 저장합니다.
 - `GET /api/tools`: 허용 도구 목록·입력 JSON Schema.
 - `POST /api/tools/:name`: `{ "arguments": { ... }, "conversation_id": "선택 UUID" }`. 방이 있으면 해당 고객 범위의 주문만 조회합니다. 방 없는 호출은 로컬 판매자 관리용입니다.

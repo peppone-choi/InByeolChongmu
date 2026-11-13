@@ -128,6 +128,61 @@ test('AC-18/20/21: shipment register, canonical retry and reasoned correction pr
   }
 });
 
+test('shipment workbook previews exact order IDs and commits atomically with safe retries', async () => {
+  const store = setup();
+  const app = appFor(store);
+  try {
+    const template = await app.request('/api/shipment-import/template');
+    assert.equal(template.status, 200);
+    const book = new ExcelJS.Workbook();
+    await book.xlsx.load(Buffer.from(await template.arrayBuffer()) as never);
+    const sheet = book.worksheets[0]!;
+    sheet.addRow(['O-0002', '가상택배', '001234', command().shipped_at]);
+    sheet.addRow(['UNKNOWN', '가상택배', '001235', command().shipped_at]);
+    const preview = async () => {
+      const response = await app.request('/api/shipment-import/preview', {
+        method: 'POST',
+        headers: {
+          'Content-Type':
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        },
+        body: new Uint8Array(await book.xlsx.writeBuffer()),
+      });
+      assert.equal(response.status, 200);
+      return response.json();
+    };
+    const checked = await preview();
+    assert.equal(checked.errors[0].row, 3);
+    assert.equal(checked.entries[0].command.tracking_number, '001234');
+    assert.equal(store.commerce.shipmentHistory(seller, 'O-0002').length, 0);
+    const good = checked.entries[0];
+    const apply = (entries: unknown[]) =>
+      app.request('/api/shipment-import/apply', request({ entries }));
+    const failure = await apply([
+      good,
+      {
+        ...good,
+        row: 3,
+        order_id: 'UNKNOWN',
+        command: { ...good.command, command_id: randomUUID() },
+      },
+    ]);
+    assert.equal(failure.status, 404);
+    assert.equal(store.commerce.shipmentHistory(seller, 'O-0002').length, 0);
+    assert.deepEqual(await (await apply([good])).json(), {
+      registered: 1,
+      replayed: 0,
+    });
+    assert.deepEqual(await (await apply([good])).json(), {
+      registered: 0,
+      replayed: 1,
+    });
+    assert.equal(store.commerce.shipmentHistory(seller, 'O-0002').length, 1);
+  } finally {
+    store.close();
+  }
+});
+
 test('AC-19: state, seller, version, missing values and future/pre-confirmation shipment times fail without writes', () => {
   const store = setup();
   try {

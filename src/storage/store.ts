@@ -75,12 +75,30 @@ export class Store {
       CREATE UNIQUE INDEX IF NOT EXISTS one_active_room_run ON agent_runs(seller_id,conversation_id) WHERE status='running';
       CREATE TABLE IF NOT EXISTS agent_tool_calls(run_id TEXT NOT NULL REFERENCES agent_runs(id),call_id TEXT NOT NULL,name TEXT NOT NULL,success INTEGER NOT NULL,result TEXT NOT NULL CHECK(json_valid(result)),PRIMARY KEY(run_id,call_id)) STRICT;
       INSERT OR IGNORE INTO schema_migrations VALUES(2);`);
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS reply_templates(seller_id TEXT PRIMARY KEY, template TEXT NOT NULL) STRICT;
+      INSERT OR IGNORE INTO schema_migrations VALUES(5);
+    `);
     this.commerce = new Commerce(this.db, this);
     this.parcels = new Parcels(this.db, this);
     this.batches = new Batches(this.db, this);
   }
   close() {
     this.db.close();
+  }
+  replyTemplate(seller: string) {
+    return String(
+      this.db
+        .prepare('SELECT template FROM reply_templates WHERE seller_id=?')
+        .get(seller)?.template ?? '',
+    );
+  }
+  saveReplyTemplate(seller: string, template: string) {
+    this.db
+      .prepare(
+        'INSERT INTO reply_templates VALUES(?,?) ON CONFLICT(seller_id) DO UPDATE SET template=excluded.template',
+      )
+      .run(seller, template);
   }
   private transaction<T>(run: () => T): T {
     this.db.exec('BEGIN IMMEDIATE');
